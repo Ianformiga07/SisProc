@@ -1,0 +1,1 @@
+function confirmar(msg){return confirm(msg);}
