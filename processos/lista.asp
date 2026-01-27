@@ -1,11 +1,77 @@
+<%
+Response.CodePage = 65001
+Response.Charset = "UTF-8"
+Session.CodePage = 65001
+%>
 <!--#include file="../config/app.asp" -->
 <!--#include file="../Lib/Conexao.asp" -->
 <!--#include file="../includes/seguranca.asp" -->
 <%
 call abreConexao
-Dim sql, rs
 
-sql = "SELECT * FROM vw_ProcessosLista ORDER BY DataCriacao DESC"
+' ===============================
+' FILTROS
+' ===============================
+Dim fNumero, fTipo, fStatus
+fNumero = Trim(Request.QueryString("numero"))
+fTipo   = Trim(Request.QueryString("tipo"))
+fStatus = Trim(Request.QueryString("status"))
+
+' ===============================
+' PAGINAÇÃO
+' ===============================
+Dim pagina, limite, offset
+limite = 10
+pagina = Request.QueryString("p")
+If pagina = "" Then pagina = 1
+pagina = CLng(pagina)
+If pagina < 1 Then pagina = 1
+
+offset = (pagina - 1) * limite
+
+' ===============================
+' SQL BASE
+' ===============================
+Dim sqlBase, sqlWhere
+sqlBase = "FROM vw_ProcessosLista WHERE 1=1 "
+sqlWhere = ""
+
+If fNumero <> "" Then
+    sqlWhere = sqlWhere & " AND NumeroProcesso LIKE '%" & Replace(fNumero,"'","''") & "%'"
+End If
+
+If fTipo <> "" Then
+    sqlWhere = sqlWhere & " AND TipoProcesso = '" & Replace(fTipo,"'","''") & "'"
+End If
+
+If fStatus <> "" Then
+    sqlWhere = sqlWhere & " AND StatusAtual = '" & Replace(fStatus,"'","''") & "'"
+End If
+
+' ===============================
+' TOTAL REGISTROS
+' ===============================
+Dim rsTotal, totalRegistros, totalPaginas
+Set rsTotal = conn.Execute("SELECT COUNT(*) AS Total " & sqlBase & sqlWhere)
+totalRegistros = rsTotal("Total")
+rsTotal.Close
+
+If totalRegistros = 0 Then
+    totalPaginas = 1
+ElseIf (totalRegistros Mod limite) = 0 Then
+    totalPaginas = totalRegistros \ limite
+Else
+    totalPaginas = (totalRegistros \ limite) + 1
+End If
+
+' ===============================
+' LISTA PAGINADA
+' ===============================
+Dim sql, rs
+sql = "SELECT * " & sqlBase & sqlWhere & _
+      " ORDER BY DataCriacao DESC " & _
+      " OFFSET " & offset & " ROWS FETCH NEXT " & limite & " ROWS ONLY"
+
 Set rs = conn.Execute(sql)
 %>
 <!DOCTYPE html>
@@ -13,7 +79,7 @@ Set rs = conn.Execute(sql)
 <head>
     <meta charset="utf-8">
     <title>SisProc - Processos</title>
-    <link rel="stylesheet" href="<%=APP_PATH%>/assets/css/dashboard.css">
+    <link rel="stylesheet" href="../assets/css/dashboard.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 
@@ -72,69 +138,125 @@ Set rs = conn.Execute(sql)
             </div>
             -->
         </div>
-        <div class="table-container">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Nº Processo</th>
-                        <th>Interessado</th>
-                        <th>Tipo</th>
-                        <th>Data</th>
-                        <th>Status</th>
-                        <th>Ações</th>
-                    </tr>
-                </thead>
-                <tbody>
 
-                <% If rs.EOF Then %>
+<div class="filters">
+    <form method="get" class="filter-form">
+        <input type="text" name="numero" placeholder="Nº Processo"
+               value="<%=fNumero%>">
 
-                    <tr>
-                        <td colspan="6" style="text-align:center; padding:20px;">
-                            Nenhum processo cadastrado.
-                        </td>
-                    </tr>
+        <select name="tipo">
+            <option value="">Tipo</option>
+            <option value="Compra" <% If fTipo="Compra" Then Response.Write("selected") %>>Compra</option>
+            <option value="Serviço" <% If fTipo="Serviço" Then Response.Write("selected") %>>Serviço</option>
+        </select>
 
-                <% Else %>
+        <select name="status">
+            <option value="">Status</option>
+            <option value="Em andamento" <% If fStatus="Em andamento" Then Response.Write("selected") %>>Em andamento</option>
+            <option value="Finalizado" <% If fStatus="Finalizado" Then Response.Write("selected") %>>Finalizado</option>
+        </select>
 
-                    <% Do While Not rs.EOF %>
+        <button class="btn-primary">
+            <i class="fa-solid fa-filter"></i> Filtrar
+        </button>
 
-                        <tr>
-                            <td><%=rs("NumeroProcesso")%></td>
+        <a href="lista.asp" class="btn-secondary">
+            Limpar
+        </a>
+    </form>
+</div>
 
-                            <td><%=rs("Assunto")%></td>
+<div class="table-responsive">
+<table class="table-modern">
+    <thead>
+        <tr>
+            <th>Nº Processo</th>
+            <th>Assunto</th>
+            <th>Tipo</th>
+            <th>Setor Atual</th>
+            <th>Data</th>
+            <th>Status</th>
+            <th class="center">Ações</th>
+        </tr>
+    </thead>
+    <tbody>
 
-                            <td><%=rs("TipoProcesso")%></td>
+    <% If rs.EOF Then %>
+        <tr>
+            <td colspan="6" class="empty">
+                Nenhum processo encontrado.
+            </td>
+        </tr>
+    <% Else %>
+        <% Do While Not rs.EOF %>
+        <tr>
+            <td><strong><%=rs("NumeroProcesso")%></strong></td>
+            <td><%=rs("Assunto")%></td>
+            <td><span class="tag"><%=rs("TipoProcesso")%></span></td>
+            <td><span class="tag"><%=rs("SetorAtual")%></span></td>
+            <td><%=FormatDateTime(rs("DataCriacao"), 2)%></td>
+            <td>
+                <span class="status-badge <%=LCase(Replace(rs("StatusAtual")," ","-"))%>">
+                    <%=rs("StatusAtual")%>
+                    <small>(<%=rs("DiasNoSetor")%> dias)</small>
+                </span>
+            </td>
+            <td class="center">
+                <a href="detalhes.asp?id=<%=rs("IdProcesso")%>" class="btn-view"> <i class="fa fa-eye"></i> Visualizar </a>
+            </td>
+        </tr>
+        <% rs.MoveNext : Loop %>
+    <% End If %>
 
-                            <td>
-                                <%=Day(rs("DataCriacao")) & "/" & Month(rs("DataCriacao")) & "/" & Year(rs("DataCriacao"))%>
-                            </td>
+    </tbody>
+</table>
+<%
+Dim queryFiltros
+queryFiltros = ""
 
-                            <td>
-                                <span class="status <%=LCase(Replace(rs("StatusAtual"), " ", "-"))%>">
-                                    <%=rs("StatusAtual")%>
-                                    (<%=rs("DiasNoSetor")%> dias)
-                                </span>
-                            </td>
+If fNumero <> "" Then queryFiltros = queryFiltros & "&numero=" & Server.URLEncode(fNumero)
+If fTipo <> "" Then queryFiltros = queryFiltros & "&tipo=" & Server.URLEncode(fTipo)
+If fStatus <> "" Then queryFiltros = queryFiltros & "&status=" & Server.URLEncode(fStatus)
+%>
+<div class="pagination">
 
-                            <td>
-                                <a href="detalhes.asp?id=<%=rs("IdProcesso")%>"
-                                class="btn-action"
-                                title="Visualizar">
-                                    <i class="fa-solid fa-eye"></i>
-                                </a>
-                            </td>
-                        </tr>
+    <% ' Botão anterior
+    If pagina > 1 Then
+    %>
+    <a href="?p=<%=pagina-1%><%=queryFiltros%>" title="Página anterior">
+        <i class="fa fa-chevron-left"></i>
+    </a>
+    <%
+    End If
+    %>
 
-                        <% rs.MoveNext %>
-                    <% Loop %>
+    <%
+    Dim i, classe
+    For i = 1 To totalPaginas
 
-                <% End If 
-                call fechaConexao
-                %>
+        If i = pagina Then
+            classe = "active"
+        Else
+            classe = ""
+        End If
+    %>
+        <a href="?p=<%=i%><%=queryFiltros%>" class="<%=classe%>"><%=i%></a>
+    <%
+    Next
+    %>
 
-                </tbody>
-            </table>
-        </div>
+    <% ' Botão próximo
+    If pagina < totalPaginas Then
+    %>
+    <a href="?p=<%=pagina+1%><%=queryFiltros%>" title="Próxima página">
+        <i class="fa fa-chevron-right"></i>
+    </a>
+    <%
+    End If
+    %>
+
+</div>
+</div>
     </main>
 
 </div>

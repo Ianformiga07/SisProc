@@ -676,3 +676,347 @@ body {
 .detalhes-tramitacao li {
   margin-bottom: 4px;
 }
+
+/* ===============================
+   GRID DOS GRÁFICOS
+   =============================== */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  margin-top: 25px;
+}
+
+/* ===============================
+   CARD DOS GRÁFICOS
+   =============================== */
+.card-box {
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 20px;
+  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Título do gráfico */
+.card-box h3 {
+  margin: 0 0 15px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+}
+
+/* ===============================
+   TAMANHO DOS CANVAS
+   =============================== */
+.card-box canvas {
+  width: 100% !important;
+  height: 260px !important; /* CONTROLA O TAMANHO */
+}
+
+/* ===============================
+   RESPONSIVO
+   =============================== */
+@media (max-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .card-box canvas {
+    height: 240px !important;
+  }
+}
+
+/* ===============================
+   CARDS (KPIs)
+   =============================== */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.card {
+  background: linear-gradient(135deg, #f9f9f9, #ffffff);
+  border-radius: 14px;
+  padding: 22px;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.08);
+  position: relative;
+  overflow: hidden;
+}
+
+.card h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.card strong {
+  font-size: 34px;
+  font-weight: 700;
+  color: #111;
+}
+
+/* Ícone decorativo */
+.card::after {
+  content: "";
+  position: absolute;
+  top: -30px;
+  right: -30px;
+  width: 120px;
+  height: 120px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 50%;
+}
+
+/* Cores por tipo */
+.card-primary {
+  border-left: 6px solid #3498db;
+}
+.card-success {
+  border-left: 6px solid #2ecc71;
+}
+.card-neutral {
+  border-left: 6px solid #9b59b6;
+}
+
+/* Responsivo */
+@media (max-width: 900px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ===============================
+   TABELA MODERNA (JÁ EXISTENTE)
+   =============================== */
+.table-responsive {
+  overflow-x: auto;
+}
+
+/* TABELA */
+.table-modern {
+  width: 100%;
+  border-collapse: collapse; /* FUNDAMENTAL */
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+  table-layout: fixed; /* ALINHAMENTO PERFEITO */
+}
+
+/* CABEÇALHO */
+.table-modern thead th {
+  background: #f8fafc;
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  color: #374151;
+  padding: 14px 12px;
+  border-bottom: 2px solid #e5e7eb;
+  border-right: 1px solid #e5e7eb;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table-modern thead th:last-child {
+  border-right: none;
+}
+
+/* CÉLULAS */
+.table-modern tbody td {
+  padding: 14px 12px;
+  font-size: 14px;
+  color: #1f2933;
+  border-bottom: 1px solid #e5e7eb;
+  border-right: 1px solid #e5e7eb;
+  vertical-align: middle;
+}
+
+.table-modern tbody td:last-child {
+  border-right: none;
+}
+
+/* ZEBRA */
+.table-modern tbody tr:nth-child(even) {
+  background: #f9fafb;
+}
+
+/* HOVER */
+.table-modern tbody tr:hover {
+  background: #eef2ff;
+  transition: background 0.2s ease;
+}
+
+.btn-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #1d4ed8;
+  text-decoration: none;
+  border: 1px solid #c7d2fe;
+  transition: all 0.2s ease;
+}
+
+.btn-view i {
+  font-size: 14px;
+}
+
+.btn-view:hover {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+}
+
+.status-badge {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+}
+
+.status-badge.em-andamento {
+  background: #eaf2ff;
+  color: #2c5cc5;
+}
+
+.status-badge.finalizado {
+  background: #e8f8ef;
+  color: #1e8449;
+}
+
+/* ===============================
+   PAGINAÇÃO REFINADA (DIREITA)
+   =============================== */
+.pagination {
+  display: flex;
+  justify-content: flex-end; /* CANTO DIREITO */
+  align-items: center;
+  margin-top: 18px;
+  gap: 4px;
+  font-size: 13px;
+}
+
+/* Botões */
+.pagination a {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  color: #374151;
+  text-decoration: none;
+
+  transition: all 0.15s ease;
+}
+
+/* Hover */
+.pagination a:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+/* Página ativa */
+.pagination a.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+  font-weight: 600;
+}
+
+/* Setas */
+.pagination a:first-child,
+.pagination a:last-child {
+  font-size: 14px;
+  font-weight: 600;
+}
+/* ======================================================
+   🔥 NOVO BLOCO — FILTROS + BOTÕES (SEM ALTERAR O RESTO)
+   ====================================================== */
+
+.filters {
+  background: #ffffff;
+  padding: 20px;
+  border-radius: 12px;
+  margin-bottom: 25px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+}
+
+.filter-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+}
+
+.filter-form input,
+.filter-form select {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  font-size: 14px;
+  background: #ffffff;
+}
+
+.filter-form input:focus,
+.filter-form select:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+/* Botões ocupam altura igual aos campos */
+.filter-form .btn-primary,
+.filter-form .btn-secondary {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* BOTÃO FILTRAR */
+.btn-primary {
+  background: #2563eb;
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn-primary:hover {
+  background: #1e40af;
+}
+
+/* BOTÃO LIMPAR */
+.btn-secondary {
+  background: #e5e7eb;
+  color: #374151;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.btn-secondary:hover {
+  background: #d1d5db;
+}

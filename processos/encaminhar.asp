@@ -1,3 +1,4 @@
+
 <!--#include file="../config/app.asp" -->
 <!--#include file="../Lib/Conexao.asp" -->
 <!--#include file="../includes/seguranca.asp" -->
@@ -26,11 +27,10 @@ End If
 ' ===============================
 Dim rsStatus, statusProcesso
 
-Set rsStatus = conn.Execute("SELECT Status FROM Processos WHERE IdProcesso = " & idProcesso)
 
+Set rsStatus = conn.Execute("SELECT Ativo as Status FROM Processos WHERE IdProcesso = " & idProcesso)
 If rsStatus.EOF Then
-    Response.Write "Processo não encontrado."
-    Response.End
+
 End If
 
 statusProcesso = rsStatus("Status")
@@ -69,8 +69,9 @@ Set rsAtual = Nothing
 
 
 ' Verifica se o setor destino é permitido a partir do atual
-sqlFluxo = "SELECT 1 FROM FluxoSetores WHERE SetorOrigem = " & idSetorAtual & " AND SetorDestino = " & idSetorDestino & ""
-
+sqlFluxo = "SELECT 1 FROM FluxoSetores WHERE IdSetorOrigem = " & idSetorAtual & " AND IdSetorDestino = " & idSetorDestino & ""
+'response.write sqlFluxo
+'response.end
 Set rsFluxo = conn.Execute(sqlFluxo)
 
 If rsFluxo.EOF Then
@@ -117,7 +118,8 @@ If CLng(idSetorDestino) = 7 Then
                   "    DataFinalizacao = GETDATE(), " & _
                   "    Ativo = 0 " & _
                   "WHERE IdProcesso = " & CLng(idProcesso)
-
+    'response.write sqlFinaliza
+    'response.end
     conn.Execute sqlFinaliza
 
 End If
