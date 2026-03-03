@@ -6,24 +6,23 @@ Response.Charset  = "UTF-8"
 <!--#include file="../config/app.asp"-->
 <!--#include file="../Lib/Conexao.asp"-->
 <!--#include file="../includes/seguranca.asp"-->
+<!--#include file="../includes/utils.asp"-->
 <%
 Call abreConexao
 
-' ── RECEBE DADOS ─────────────────────────────────────────
 Dim idProcesso, idSetorDestino, observacao
 idProcesso     = dbInt(Request.Form("id_processo"))
 idSetorDestino = dbInt(Request.Form("setor_destino"))
 observacao     = dbStr(Request.Form("observacao"))
 
-' ── VALIDAÇÃO BÁSICA ─────────────────────────────────────
 If idProcesso = 0 Or idSetorDestino = 0 Then
     Response.Redirect "lista.asp"
     Response.End
 End If
 
-' ── PROCESSO EXISTE E NÃO ESTÁ FINALIZADO ────────────────
+' Verifica se processo existe e esta ativo (usa apenas Ativo, sem StatusAtual)
 Dim rsProc
-Set rsProc = dbQuery("SELECT Ativo, StatusAtual FROM Processos WHERE IdProcesso = " & idProcesso)
+Set rsProc = dbQuery("SELECT Ativo FROM Processos WHERE IdProcesso = " & idProcesso)
 If rsProc.EOF Or rsProc("Ativo") = False Then
     rsProc.Close : Set rsProc = Nothing
     Response.Redirect "detalhes.asp?id=" & idProcesso & "&erro=processo_finalizado"
@@ -31,7 +30,7 @@ If rsProc.EOF Or rsProc("Ativo") = False Then
 End If
 rsProc.Close : Set rsProc = Nothing
 
-' ── BUSCA TRAMITAÇÃO ATUAL ────────────────────────────────
+' Busca a tramitacao atual aberta
 Dim rsAtual, idSetorAtual, idTramAtual
 Set rsAtual = dbQuery( _
     "SELECT TOP 1 IdTramitacao, IdSetor FROM Tramitacoes " & _
@@ -48,7 +47,13 @@ idSetorAtual = rsAtual("IdSetor")
 idTramAtual  = rsAtual("IdTramitacao")
 rsAtual.Close : Set rsAtual = Nothing
 
-' ── VALIDA FLUXO NO BANCO (único ponto de verdade) ───────
+' REGRA: so quem pertence ao setor atual pode encaminhar
+If sessIdSetor <> idSetorAtual And Not sessIsAdmin Then
+    Response.Redirect "detalhes.asp?id=" & idProcesso & "&erro=sem_permissao"
+    Response.End
+End If
+
+' Valida fluxo no banco (unico ponto de verdade)
 Dim rsFluxo
 Set rsFluxo = dbQuery( _
     "SELECT COUNT(*) AS Ok FROM FluxoSetores " & _
@@ -62,19 +67,22 @@ If rsFluxo("Ok") = 0 Then
 End If
 rsFluxo.Close : Set rsFluxo = Nothing
 
-' ── 1. FECHA A TRAMITAÇÃO ATUAL ───────────────────────────
+' 1. Fecha a tramitacao atual
 dbExecute "UPDATE Tramitacoes SET DataSaida = GETDATE() WHERE IdTramitacao = " & idTramAtual
 
-' ── 2. INSERE NOVA TRAMITAÇÃO ─────────────────────────────
+' 2. Insere nova tramitacao
 dbExecute _
-    "INSERT INTO Tramitacoes (IdProcesso, IdSetor, IdUsuario, Observacao, TipoMovimento) " & _
-    "VALUES (" & idProcesso & ", " & idSetorDestino & ", " & sessId & ", '" & observacao & "', 'Encaminhar')"
+    "INSERT INTO Tramitacoes (IdProcesso, IdSetor, MatriculaUsuario, Observacao) " & _
+    "VALUES (" & idProcesso & ", " & idSetorDestino & ", '" & sessMatricula & "', '" & observacao & "')"
 
-Dim idTramNova : idTramNova = dbLastId()
+Dim idTramNova
+Set rsId = conn.Execute("SELECT SCOPE_IDENTITY() AS Id")
+idTramNova = CLng(rsId("Id"))
+rsId.Close : Set rsId = Nothing
 
-' ── 3. SALVA DETALHES ESPECÍFICOS DO SETOR ───────────────
-Sub salvarDetalhe(campo, valor)
-    Dim v : v = dbStr(Trim(Request.Form(valor)))
+' 3. Salva detalhes especificos por setor destino
+Sub salvarDetalhe(campo, formField)
+    Dim v : v = dbStr(Trim(Request.Form(formField)))
     If v <> "" Then
         dbExecute "INSERT INTO TramitacaoDetalhes (IdTramitacao, Campo, Valor) " & _
                   "VALUES (" & idTramNova & ", '" & campo & "', '" & v & "')"
@@ -82,31 +90,31 @@ Sub salvarDetalhe(campo, valor)
 End Sub
 
 Select Case idSetorDestino
-    Case 2  ' Setor Solicitante
-        Call salvarDetalhe("Descrição",  "descricao")
+    Case 2
+        Call salvarDetalhe("Descricao",  "descricao")
         Call salvarDetalhe("Quantidade", "quantidade")
-        Call salvarDetalhe("Urgência",   "urgencia")
-    Case 3  ' Compras
+        Call salvarDetalhe("Urgencia",   "urgencia")
+    Case 3
         Call salvarDetalhe("Fornecedor",    "fornecedor")
-        Call salvarDetalhe("Cotações",      "cotacoes")
+        Call salvarDetalhe("Cotacoes",      "cotacoes")
         Call salvarDetalhe("Tipo de Compra","tipo_compra")
-    Case 4  ' Planejamento
-        Call salvarDetalhe("Análise",    "analise_planejamento")
+    Case 4
+        Call salvarDetalhe("Analise",    "analise_planejamento")
         Call salvarDetalhe("Impacto",    "impacto")
         Call salvarDetalhe("Prioridade", "prioridade")
-    Case 5  ' Licitação SCL
-        Call salvarDetalhe("Nº Processo Licitatório", "numero_edital")
-        Call salvarDetalhe("Modalidade",              "modalidade")
-        Call salvarDetalhe("Parecer Jurídico",        "parecer_juridico")
-    Case 6  ' Financeiro
+    Case 5
+        Call salvarDetalhe("Num Licitatorio", "numero_edital")
+        Call salvarDetalhe("Modalidade",      "modalidade")
+        Call salvarDetalhe("Parecer",         "parecer_juridico")
+    Case 6
         Call salvarDetalhe("Centro de Custo", "centro_custo")
-        Call salvarDetalhe("Autorização",     "autorizacao")
-    Case 7  ' NAP
-        Call salvarDetalhe("Análise NAP",  "providencia_nap")
+        Call salvarDetalhe("Autorizacao",     "autorizacao")
+    Case 7
+        Call salvarDetalhe("Analise NAP",  "providencia_nap")
         Call salvarDetalhe("Status NAP",   "status_nap")
 End Select
 
 Call fechaConexao
 
-Response.Redirect "detalhes.asp?id=" & idProcesso
+Response.Redirect "detalhes.asp?id=" & idProcesso & "&ok=encaminhado"
 %>

@@ -59,9 +59,6 @@ Function dbInt(valor)
     End If
 End Function
 
-Function dbStr(valor)
-    dbStr = Replace(Trim(valor & ""), "'", "''")
-End Function
 %>
 
 <!--  FUNÇÃO UTILITÁRIA PARA GERAR BADGE DE SLA -->

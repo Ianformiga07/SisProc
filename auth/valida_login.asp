@@ -1,46 +1,64 @@
-<!--#include file="../Lib/Conexao.asp" -->
-<!--#include file="../config/app.asp" -->
-
+<!--#include file="../config/app.asp"-->
+<!--#include file="../Lib/Conexao.asp"-->
 <%
-call abreConexao
+Call abreConexao
 
-Dim login, senha, sql, rs, cmd
-
+Dim login, senha
 login = Trim(Request.Form("login"))
 senha = Trim(Request.Form("senha"))
 
-sql = "SELECT U.IdUsuario_Int AS IdUsuario, U.Matricula, U.IdPerfil, C.Nome " & _
+' Busca usuario com JOIN no CadFunc para pegar o Nome
+' E popula tambem IdSetor e NomeSetor para o layout funcionar
+Dim sql
+sql = "SELECT U.Matricula, U.IdPerfil, U.IdSetor, " & _
+      "       S.NomeSetor, C.Nome " & _
       "FROM Usuarios U " & _
+      "INNER JOIN Setores S ON S.IdSetor = U.IdSetor " & _
       "INNER JOIN Adapec.dbo.CadFunc C ON C.Matricula = U.Matricula " & _
       "WHERE U.Login = ? AND U.Senha = ? AND U.Ativo = 1"
 
-'response.write sql
-'response.end
+Dim cmd
 Set cmd = Server.CreateObject("ADODB.Command")
 Set cmd.ActiveConnection = conn
 cmd.CommandText = sql
-cmd.CommandType = 1 ' adCmdText
+cmd.CommandType = 1
 
-cmd.Parameters.Append cmd.CreateParameter("@login", 200, 1, 50, login)
+cmd.Parameters.Append cmd.CreateParameter("@login", 200, 1, 50,  login)
 cmd.Parameters.Append cmd.CreateParameter("@senha", 200, 1, 255, senha)
 
+Dim rs
 Set rs = cmd.Execute
 
 If Not rs.EOF Then
     Session.Timeout = 30
-    Session("IdUsuario") = rs("IdUsuario")
-    Session("Matricula") = rs("Matricula")
-    Session("Nome") = rs("Nome")
-    Session("IdPerfil") = rs("IdPerfil")
 
-    Response.Redirect(APP_PATH & "/index.asp")
+    ' Popula todas as variaveis de sessao que o sistema usa
+    Session("Matricula")  = rs("Matricula")
+    Session("IdPerfil")   = rs("IdPerfil")
+    Session("IdSetor")    = rs("IdSetor")
+    Session("NomeSetor")  = rs("NomeSetor")
+    Session("Nome")       = rs("Nome")
+
+    ' IdUsuario: busca o ID interno (pode ser IdUsuario_Int ou campo numerico da tabela)
+    Dim rsId
+    Set rsId = conn.Execute("SELECT IdUsuario_Int AS Id FROM Usuarios WHERE Matricula = '" & Replace(rs("Matricula"),"'","''") & "'")
+    If Not rsId.EOF Then
+        Session("IdUsuario") = rsId("Id")
+    Else
+        Session("IdUsuario") = 0
+    End If
+    rsId.Close : Set rsId = Nothing
+
+    rs.Close : Set rs = Nothing
+    Set cmd = Nothing
+    Call fechaConexao
+
+    Response.Redirect APP_PATH & "/index.asp"
 Else
-    Response.Redirect("login.asp?erro=1")
+    rs.Close : Set rs = Nothing
+    Set cmd = Nothing
+    Call fechaConexao
+
+    Response.Redirect "login.asp?erro=1"
 End If
-
-rs.Close
-Set rs = Nothing
-Set cmd = Nothing
-
-call fechaConexao
 %>
