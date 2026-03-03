@@ -31,14 +31,15 @@ If rsDup("Total") > 0 Then
 End If
 rsDup.Close : Set rsDup = Nothing
 
-' PASSO 1: executa o INSERT separado (sem tentar ler resultado)
+' PASSO 1: INSERT do processo
 dbExecute _
     "INSERT INTO Processos (NumeroProcesso, Assunto, Descricao, TipoProcesso, MatriculaCriador) " & _
     "VALUES ('" & numero & "', '" & assunto & "', '" & descricao & "', '" & tipo & "', '" & sessMatricula & "')"
 
-' PASSO 2: busca o ID gerado em query separada
+' PASSO 2: Pega o ID gerado com @@IDENTITY
+' @@IDENTITY funciona na mesma conexao independente do provider
 Dim rsId, idProcesso
-Set rsId = dbQuery("SELECT SCOPE_IDENTITY() AS Id")
+Set rsId = dbQuery("SELECT @@IDENTITY AS Id")
 
 If rsId.EOF Or IsNull(rsId("Id")) Then
     rsId.Close : Set rsId = Nothing
@@ -49,7 +50,7 @@ End If
 idProcesso = CLng(rsId("Id"))
 rsId.Close : Set rsId = Nothing
 
-' PASSO 3: cria a primeira tramitacao no Protocolo (setor 1)
+' PASSO 3: Cria primeira tramitacao no Protocolo (setor 1)
 dbExecute _
     "INSERT INTO Tramitacoes (IdProcesso, IdSetor, MatriculaUsuario, Observacao) " & _
     "VALUES (" & idProcesso & ", 1, '" & sessMatricula & "', 'Processo autuado no Protocolo.')"

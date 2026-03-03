@@ -75,7 +75,7 @@ If IsNull(rsProc("IdSetorAtual")) Then
     diasNoSetor  = 0
     idTramAtual  = 0
 Else
-    idSetorAtual = rsProc("IdSetorAtual")
+    idSetorAtual = CLng(rsProc("IdSetorAtual"))
     setorAtual   = rsProc("SetorAtual")
     diasNoSetor  = rsProc("DiasNoSetor")
     idTramAtual  = rsProc("IdTramAtual")
@@ -83,12 +83,21 @@ End If
 
 rsProc.Close : Set rsProc = Nothing
 
-' ── PERMISSAO: so o setor atual (ou admin) pode agir ─────
-' podeAgir = processo ativo E (usuario e do setor atual OU e admin)
+' ── PERMISSAO ────────────────────────────────────────────
+' Admin sempre pode agir. Usuario comum só se for do setor atual.
+' sessIdSetor vem da Session populada no login.
 Dim podeAgir
-podeAgir = (Not processoFinalizado) And (sessIdSetor = idSetorAtual Or sessIsAdmin)
+If processoFinalizado Then
+    podeAgir = False
+ElseIf sessIsAdmin Then
+    podeAgir = True
+ElseIf CLng(sessIdSetor) = idSetorAtual Then
+    podeAgir = True
+Else
+    podeAgir = False
+End If
 
-' ── SETORES DESTINO PERMITIDOS (apenas os do fluxo) ──────
+' ── SETORES DESTINO (apenas os permitidos pelo FluxoSetores) ─
 Dim rsDestinos
 Set rsDestinos = dbQuery( _
     "SELECT F.IdSetorDestino, S.NomeSetor " & _
@@ -97,7 +106,7 @@ Set rsDestinos = dbQuery( _
     "WHERE F.IdSetorOrigem = " & idSetorAtual & " AND F.Ativo = 1 " & _
     "ORDER BY S.NomeSetor")
 
-' ── HISTORICO DE TRAMITACOES ─────────────────────────────
+' ── HISTORICO ────────────────────────────────────────────
 Dim rsHist
 Set rsHist = dbQuery( _
     "SELECT T.IdTramitacao, T.IdSetor, S.NomeSetor, T.MatriculaUsuario, " & _
@@ -149,27 +158,25 @@ If Not rsAnterior.EOF Then
     nomeSetorAnterior = rsAnterior("NomeSetor")
 Else
     idSetorAnterior   = idSetorAtual
-    nomeSetorAnterior = setorAtual & " (sem historico anterior)"
+    nomeSetorAnterior = "Sem setor anterior"
 End If
 rsAnterior.Close : Set rsAnterior = Nothing
 
-' ── Parametros de layout ─────────────────────────────────
+' ── Flags de retorno para SweetAlert ─────────────────────
+Dim flagNovo        : flagNovo        = (Request.QueryString("novo") = "1")
+Dim flagEncaminhado : flagEncaminhado = (Request.QueryString("ok")   = "encaminhado")
+Dim flagDevolvido   : flagDevolvido   = (Request.QueryString("ok")   = "devolvido")
+Dim flagSemPerm     : flagSemPerm     = (Request.QueryString("erro") = "sem_permissao")
+Dim flagFluxo       : flagFluxo       = (Request.QueryString("erro") = "fluxo_invalido")
+
 Dim pageTitulo  : pageTitulo  = "Processo " & numProcesso
 Dim paginaAtiva : paginaAtiva = "processos"
-
-' ── Captura flags de retorno ─────────────────────────────
-Dim flagNovo        : flagNovo        = (Request.QueryString("novo")  = "1")
-Dim flagEncaminhado : flagEncaminhado = (Request.QueryString("ok")    = "encaminhado")
-Dim flagDevolvido   : flagDevolvido   = (Request.QueryString("ok")    = "devolvido")
-Dim flagSemPerm     : flagSemPerm     = (Request.QueryString("erro")  = "sem_permissao")
-Dim flagFluxo       : flagFluxo       = (Request.QueryString("erro")  = "fluxo_invalido")
 %>
 <!--#include file="../includes/layout.asp"-->
 
-<!-- SweetAlert2 -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
-<!-- HEADER DA PAGINA -->
+<!-- HEADER -->
 <div class="page-header">
     <h1>
         <a href="lista.asp" class="btn-back"><i class="fa-solid fa-arrow-left"></i></a>
@@ -191,26 +198,30 @@ Dim flagFluxo       : flagFluxo       = (Request.QueryString("erro")  = "fluxo_i
 </div>
 <% End If %>
 
-<!-- AVISO DE SOMENTE VISUALIZACAO (usuario de outro setor) -->
+<!-- AVISO SOMENTE LEITURA (outro setor, nao admin) -->
 <% If Not processoFinalizado And Not podeAgir Then %>
 <div class="alert alert-info" style="margin-bottom:16px">
     <i class="fa-solid fa-circle-info"></i>
-    Este processo esta no setor <strong><%=setorAtual%></strong>. Apenas usuarios desse setor podem encaminhar ou devolver.
+    Este processo esta no setor <strong><%=setorAtual%></strong>.
+    Apenas usuarios desse setor podem encaminhar ou devolver.
 </div>
 <% End If %>
 
-<!-- BOTOES DE ACAO (so aparece para quem pode agir) -->
+<!-- BOTOES DE ACAO -->
 <% If podeAgir Then %>
 <div class="action-bar">
+
     <% If Not rsDestinos.EOF Then %>
     <button onclick="abrirModal('modalEncaminhar')" class="btn btn-primary">
         <i class="fa-solid fa-share"></i> Encaminhar
     </button>
     <% End If %>
 
+    <% If idSetorAnterior <> idSetorAtual Then %>
     <button onclick="abrirModal('modalDevolver')" class="btn btn-warning">
         <i class="fa-solid fa-rotate-left"></i> Devolver
     </button>
+    <% End If %>
 
     <% If sessIsAdmin Then %>
     <a href="finalizar.asp?id=<%=idProcesso%>"
@@ -219,6 +230,7 @@ Dim flagFluxo       : flagFluxo       = (Request.QueryString("erro")  = "fluxo_i
         <i class="fa-solid fa-check-circle"></i> Finalizar
     </a>
     <% End If %>
+
 </div>
 <% End If %>
 
@@ -232,15 +244,15 @@ Dim flagFluxo       : flagFluxo       = (Request.QueryString("erro")  = "fluxo_i
         </div>
         <div class="detail-item">
             <label>Tipo</label>
-            <span><span class="badge badge-tipo"><%=tipo%></span></span>
+            <span class="badge badge-tipo"><%=tipo%></span>
         </div>
         <div class="detail-item">
             <label>Status</label>
-            <span><span class="badge <%=badgeStatus(statusAtual)%>"><%=statusAtual%></span></span>
+            <span class="badge <%=badgeStatus(statusAtual)%>"><%=statusAtual%></span>
         </div>
         <div class="detail-item">
             <label>Setor Atual</label>
-            <span><span class="badge badge-setor"><%=setorAtual%></span></span>
+            <span class="badge badge-setor"><%=setorAtual%></span>
         </div>
         <div class="detail-item">
             <label>Dias no Setor</label>
@@ -273,11 +285,11 @@ Dim flagFluxo       : flagFluxo       = (Request.QueryString("erro")  = "fluxo_i
 <div class="card-box">
     <div class="card-box-title"><i class="fa-solid fa-timeline"></i> Historico de Tramitacoes</div>
     <div class="timeline">
-    <% Dim primeiroItem : primeiroItem = True %>
-    <% Do While Not rsHist.EOF %>
-        <%
-        Dim tramIdH  : tramIdH  = CStr(rsHist("IdTramitacao"))
-        Dim isAtual  : isAtual  = IsNull(rsHist("DataSaida"))
+    <%
+    Dim primeiroItem : primeiroItem = True
+    Do While Not rsHist.EOF
+        Dim tramIdH : tramIdH = CStr(rsHist("IdTramitacao"))
+        Dim isAtual : isAtual = IsNull(rsHist("DataSaida"))
         Dim dotClass
         If isAtual And primeiroItem Then
             dotClass = "atual"
@@ -285,7 +297,7 @@ Dim flagFluxo       : flagFluxo       = (Request.QueryString("erro")  = "fluxo_i
             dotClass = "encaminhar"
         End If
         primeiroItem = False
-        %>
+    %>
         <div class="timeline-item">
             <div class="timeline-dot <%=dotClass%>"></div>
             <div class="timeline-card <%If dotClass="atual" Then Response.Write "atual"%>">
@@ -299,7 +311,6 @@ Dim flagFluxo       : flagFluxo       = (Request.QueryString("erro")  = "fluxo_i
                             <% End If %>
                         </div>
                         <div class="timeline-data">
-                            <i class="fa-regular fa-calendar"></i>
                             <%=fmtDataHora(rsHist("DataEntrada"))%>
                             <% If Not IsNull(rsHist("DataSaida")) Then %>
                                 &rarr; <%=fmtDataHora(rsHist("DataSaida"))%>
@@ -332,12 +343,11 @@ Dim flagFluxo       : flagFluxo       = (Request.QueryString("erro")  = "fluxo_i
     <% rsHist.MoveNext : Loop %>
     </div>
 </div>
-
 <%
 rsHist.Close : Set rsHist = Nothing
 %>
 
-<!-- ===== MODAL ENCAMINHAR ===== -->
+<!-- MODAL ENCAMINHAR -->
 <div id="modalEncaminhar" class="modal-overlay" onclick="fecharSeOverlay(event,'modalEncaminhar')">
     <div class="modal-box">
         <div class="modal-header">
@@ -352,9 +362,7 @@ rsHist.Close : Set rsHist = Nothing
                     <label>Encaminhar para <span style="color:var(--danger)">*</span></label>
                     <select name="setor_destino" required id="selDestino" onchange="mostrarCampos(this.value)">
                         <option value="">Selecione o setor...</option>
-                        <%
-                        Do While Not rsDestinos.EOF
-                        %>
+                        <% Do While Not rsDestinos.EOF %>
                             <option value="<%=rsDestinos("IdSetorDestino")%>"><%=rsDestinos("NomeSetor")%></option>
                         <% rsDestinos.MoveNext : Loop %>
                     </select>
@@ -365,156 +373,93 @@ rsHist.Close : Set rsHist = Nothing
                     <textarea name="observacao" rows="3" placeholder="Observacoes sobre o encaminhamento..."></textarea>
                 </div>
 
-                <!-- SETOR SOLICITANTE (2) -->
                 <div class="campos-setor" id="campos-2">
-                    <div class="campos-setor-titulo">Informacoes do Setor Solicitante</div>
-                    <div class="form-group">
-                        <label>Descricao do Pedido</label>
-                        <textarea name="descricao" rows="3"></textarea>
-                    </div>
+                    <div class="campos-setor-titulo">Informacoes — Setor Solicitante</div>
+                    <div class="form-group"><label>Descricao do Pedido</label><textarea name="descricao" rows="3"></textarea></div>
                     <div class="form-grid">
-                        <div class="form-group">
-                            <label>Quantidade</label>
-                            <input type="number" name="quantidade" min="1">
-                        </div>
+                        <div class="form-group"><label>Quantidade</label><input type="number" name="quantidade" min="1"></div>
                         <div class="form-group">
                             <label>Urgencia</label>
                             <select name="urgencia">
                                 <option value="">Selecione</option>
-                                <option>Normal</option>
-                                <option>Urgente</option>
+                                <option>Normal</option><option>Urgente</option>
                             </select>
                         </div>
                     </div>
                 </div>
 
-                <!-- COMPRAS (3) -->
                 <div class="campos-setor" id="campos-3">
-                    <div class="campos-setor-titulo">Informacoes de Compras</div>
-                    <div class="form-group">
-                        <label>Fornecedor</label>
-                        <input type="text" name="fornecedor">
-                    </div>
+                    <div class="campos-setor-titulo">Informacoes — Compras</div>
+                    <div class="form-group"><label>Fornecedor</label><input type="text" name="fornecedor"></div>
                     <div class="form-grid">
-                        <div class="form-group">
-                            <label>Cotacoes</label>
-                            <input type="number" name="cotacoes" min="0">
-                        </div>
+                        <div class="form-group"><label>Cotacoes</label><input type="number" name="cotacoes" min="0"></div>
                         <div class="form-group">
                             <label>Tipo de Compra</label>
                             <select name="tipo_compra">
                                 <option value="">Selecione</option>
-                                <option>Licitacao</option>
-                                <option>Dispensa</option>
+                                <option>Licitacao</option><option>Dispensa</option>
                             </select>
                         </div>
                     </div>
                 </div>
 
-                <!-- PLANEJAMENTO (4) -->
                 <div class="campos-setor" id="campos-4">
-                    <div class="campos-setor-titulo">Informacoes de Planejamento</div>
-                    <div class="form-group">
-                        <label>Analise de Planejamento</label>
-                        <textarea name="analise_planejamento" rows="3"></textarea>
-                    </div>
+                    <div class="campos-setor-titulo">Informacoes — Planejamento</div>
+                    <div class="form-group"><label>Analise de Planejamento</label><textarea name="analise_planejamento" rows="3"></textarea></div>
                     <div class="form-grid">
                         <div class="form-group">
                             <label>Impacto</label>
-                            <select name="impacto">
-                                <option value="">Selecione</option>
-                                <option>Baixo</option>
-                                <option>Medio</option>
-                                <option>Alto</option>
-                            </select>
+                            <select name="impacto"><option value="">Selecione</option><option>Baixo</option><option>Medio</option><option>Alto</option></select>
                         </div>
                         <div class="form-group">
                             <label>Prioridade</label>
-                            <select name="prioridade">
-                                <option value="">Selecione</option>
-                                <option>Normal</option>
-                                <option>Alta</option>
-                                <option>Urgente</option>
-                            </select>
+                            <select name="prioridade"><option value="">Selecione</option><option>Normal</option><option>Alta</option><option>Urgente</option></select>
                         </div>
                     </div>
                 </div>
 
-                <!-- LICITACAO SCL (5) -->
                 <div class="campos-setor" id="campos-5">
-                    <div class="campos-setor-titulo">Informacoes da Licitacao (SCL)</div>
+                    <div class="campos-setor-titulo">Informacoes — Licitacao (SCL)</div>
                     <div class="form-grid">
-                        <div class="form-group">
-                            <label>Num do Processo Licitatorio</label>
-                            <input type="text" name="numero_edital">
-                        </div>
+                        <div class="form-group"><label>Num Processo Licitatorio</label><input type="text" name="numero_edital"></div>
                         <div class="form-group">
                             <label>Modalidade</label>
-                            <select name="modalidade">
-                                <option value="">Selecione</option>
-                                <option>Pregao Eletronico</option>
-                                <option>Pregao Presencial</option>
-                                <option>Concorrencia</option>
-                                <option>Dispensa</option>
-                            </select>
+                            <select name="modalidade"><option value="">Selecione</option><option>Pregao Eletronico</option><option>Pregao Presencial</option><option>Concorrencia</option><option>Dispensa</option></select>
                         </div>
                     </div>
-                    <div class="form-group">
-                        <label>Parecer Juridico</label>
-                        <textarea name="parecer_juridico" rows="2"></textarea>
-                    </div>
+                    <div class="form-group"><label>Parecer Juridico</label><textarea name="parecer_juridico" rows="2"></textarea></div>
                 </div>
 
-                <!-- FINANCEIRO (6) -->
                 <div class="campos-setor" id="campos-6">
-                    <div class="campos-setor-titulo">Informacoes do Financeiro</div>
+                    <div class="campos-setor-titulo">Informacoes — Financeiro</div>
                     <div class="form-grid">
-                        <div class="form-group">
-                            <label>Centro de Custo</label>
-                            <input type="text" name="centro_custo">
-                        </div>
+                        <div class="form-group"><label>Centro de Custo</label><input type="text" name="centro_custo"></div>
                         <div class="form-group">
                             <label>Autorizacao</label>
-                            <select name="autorizacao">
-                                <option value="">Selecione</option>
-                                <option>Aprovado</option>
-                                <option>Reprovado</option>
-                                <option>Pendente</option>
-                            </select>
+                            <select name="autorizacao"><option value="">Selecione</option><option>Aprovado</option><option>Reprovado</option><option>Pendente</option></select>
                         </div>
                     </div>
                 </div>
 
-                <!-- NAP (7) -->
                 <div class="campos-setor" id="campos-7">
-                    <div class="campos-setor-titulo">Informacoes do NAP</div>
-                    <div class="form-group">
-                        <label>Analise / Providencia</label>
-                        <textarea name="providencia_nap" rows="3"></textarea>
-                    </div>
+                    <div class="campos-setor-titulo">Informacoes — NAP</div>
+                    <div class="form-group"><label>Analise / Providencia</label><textarea name="providencia_nap" rows="3"></textarea></div>
                     <div class="form-group">
                         <label>Status NAP</label>
-                        <select name="status_nap">
-                            <option value="">Selecione</option>
-                            <option>Aprovado</option>
-                            <option>Pendente</option>
-                            <option>Devolvido</option>
-                        </select>
+                        <select name="status_nap"><option value="">Selecione</option><option>Aprovado</option><option>Pendente</option><option>Devolvido</option></select>
                     </div>
                 </div>
 
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-ghost" onclick="fecharModal('modalEncaminhar')">Cancelar</button>
-                <button type="submit" class="btn btn-primary">
-                    <i class="fa-solid fa-share"></i> Confirmar Encaminhamento
-                </button>
+                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-share"></i> Confirmar Encaminhamento</button>
             </div>
         </form>
     </div>
 </div>
 
-<!-- ===== MODAL DEVOLVER ===== -->
+<!-- MODAL DEVOLVER -->
 <div id="modalDevolver" class="modal-overlay" onclick="fecharSeOverlay(event,'modalDevolver')">
     <div class="modal-box">
         <div class="modal-header">
@@ -525,29 +470,24 @@ rsHist.Close : Set rsHist = Nothing
             <div class="modal-body">
                 <input type="hidden" name="id_processo" value="<%=idProcesso%>">
                 <input type="hidden" name="setor_destino" value="<%=idSetorAnterior%>">
-
                 <div class="form-group">
                     <label>Devolver para</label>
                     <input type="text" value="<%=nomeSetorAnterior%>" disabled style="background:var(--bg)">
                 </div>
-
                 <div class="form-group">
                     <label>Motivo da Devolucao <span style="color:var(--danger)">*</span></label>
-                    <textarea name="observacao" rows="4" required placeholder="Descreva o motivo da devolucao..."></textarea>
+                    <textarea name="observacao" rows="4" required placeholder="Descreva o motivo..."></textarea>
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-ghost" onclick="fecharModal('modalDevolver')">Cancelar</button>
-                <button type="submit" class="btn btn-warning">
-                    <i class="fa-solid fa-rotate-left"></i> Confirmar Devolucao
-                </button>
+                <button type="submit" class="btn btn-warning"><i class="fa-solid fa-rotate-left"></i> Confirmar Devolucao</button>
             </div>
         </form>
     </div>
 </div>
 
 <script>
-// ── MODAIS ───────────────────────────────────────────────
 function abrirModal(id) {
     document.getElementById(id).classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -559,8 +499,6 @@ function fecharModal(id) {
 function fecharSeOverlay(e, id) {
     if (e.target === document.getElementById(id)) fecharModal(id);
 }
-
-// ── CAMPOS DINAMICOS POR SETOR ───────────────────────────
 function mostrarCampos(idSetor) {
     document.querySelectorAll('.campos-setor').forEach(function(el) {
         el.classList.remove('ativo');
@@ -571,70 +509,38 @@ function mostrarCampos(idSetor) {
     }
 }
 
-// ── SWEETALERT: dispara conforme flag da URL ─────────────
-<%
-If flagNovo Then
-%>
+// SweetAlert conforme flag da URL
+<% If flagNovo Then %>
 window.addEventListener('DOMContentLoaded', function() {
-    Swal.fire({
-        icon: 'success',
-        title: 'Processo criado!',
-        text: 'O processo foi autuado e encaminhado ao Protocolo.',
-        confirmButtonColor: '#1a56db',
-        confirmButtonText: 'OK'
-    });
+    Swal.fire({ icon:'success', title:'Processo criado!',
+        text:'Autuado e encaminhado ao Protocolo.',
+        confirmButtonColor:'#1a56db', confirmButtonText:'OK' });
 });
-<%
-ElseIf flagEncaminhado Then
-%>
+<% ElseIf flagEncaminhado Then %>
 window.addEventListener('DOMContentLoaded', function() {
-    Swal.fire({
-        icon: 'success',
-        title: 'Encaminhado!',
-        text: 'O processo foi encaminhado com sucesso.',
-        confirmButtonColor: '#1a56db',
-        timer: 3000,
-        timerProgressBar: true
-    });
+    Swal.fire({ icon:'success', title:'Encaminhado!',
+        text:'Processo encaminhado com sucesso.',
+        confirmButtonColor:'#1a56db', timer:3000, timerProgressBar:true });
 });
-<%
-ElseIf flagDevolvido Then
-%>
+<% ElseIf flagDevolvido Then %>
 window.addEventListener('DOMContentLoaded', function() {
-    Swal.fire({
-        icon: 'warning',
-        title: 'Processo devolvido',
-        text: 'O processo foi devolvido ao setor anterior.',
-        confirmButtonColor: '#d97706',
-        timer: 3000,
-        timerProgressBar: true
-    });
+    Swal.fire({ icon:'warning', title:'Processo devolvido',
+        text:'Devolvido ao setor anterior.',
+        confirmButtonColor:'#d97706', timer:3000, timerProgressBar:true });
 });
-<%
-ElseIf flagSemPerm Then
-%>
+<% ElseIf flagSemPerm Then %>
 window.addEventListener('DOMContentLoaded', function() {
-    Swal.fire({
-        icon: 'error',
-        title: 'Sem permissao',
-        text: 'Apenas usuarios do setor atual podem movimentar este processo.',
-        confirmButtonColor: '#dc2626'
-    });
+    Swal.fire({ icon:'error', title:'Sem permissao',
+        text:'Apenas usuarios do setor atual podem movimentar este processo.',
+        confirmButtonColor:'#dc2626' });
 });
-<%
-ElseIf flagFluxo Then
-%>
+<% ElseIf flagFluxo Then %>
 window.addEventListener('DOMContentLoaded', function() {
-    Swal.fire({
-        icon: 'error',
-        title: 'Encaminhamento invalido',
-        text: 'Este setor de destino nao e permitido a partir do setor atual.',
-        confirmButtonColor: '#dc2626'
-    });
+    Swal.fire({ icon:'error', title:'Encaminhamento invalido',
+        text:'Destino nao permitido a partir do setor atual.',
+        confirmButtonColor:'#dc2626' });
 });
-<%
-End If
-%>
+<% End If %>
 </script>
 
 <%
