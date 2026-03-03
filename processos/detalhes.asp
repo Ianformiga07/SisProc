@@ -1,629 +1,640 @@
-
-<!--#include file="../config/app.asp" -->
-<!--#include file="../Lib/Conexao.asp" -->
-<!--#include file="../includes/seguranca.asp" -->
-
+<%@LANGUAGE="VBSCRIPT" CODEPAGE="65001"%>
 <%
-call abreConexao
+Response.CodePage = 65001
+Response.Charset  = "UTF-8"
+%>
+<!--#include file="../config/app.asp"-->
+<!--#include file="../Lib/Conexao.asp"-->
+<!--#include file="../includes/seguranca.asp"-->
+<!--#include file="../includes/utils.asp"-->
+<%
+Call abreConexao
 
 Dim idProcesso
-idProcesso = CLng(Request.QueryString("id"))
+If IsNumeric(Request.QueryString("id")) Then
+    idProcesso = CLng(Request.QueryString("id"))
+Else
+    idProcesso = 0
+End If
 
-' =======================
-' DADOS DO PROCESSO
-' =======================
-Dim sqlProc, rsProc
-
-sqlProc = "SELECT P.IdProcesso, P.NumeroProcesso, P.Assunto, P.Descricao, P.DataCriacao, P.MatriculaCriador, T.IdSetor, SE.NomeSetor, T.DataEntrada, DATEDIFF(DAY, T.DataEntrada, GETDATE()) AS DiasParado FROM Processos P OUTER APPLY (SELECT TOP 1 * FROM Tramitacoes WHERE IdProcesso = P.IdProcesso ORDER BY DataEntrada DESC) T OUTER APPLY (SELECT * FROM Setores WHERE IdSetor = T.IdSetor) SE " & _
-          "WHERE P.IdProcesso = " & idProcesso
-
-'response.write sqlProc
-Set rsProc = conn.Execute(sqlProc)
-
-
-If rsProc.EOF Then
-    Response.Write "Processo não encontrado."
+If idProcesso = 0 Then
+    Response.Redirect "lista.asp"
     Response.End
 End If
 
-Dim numeroProcesso, dataAbertura, setorAtual, diasParado
-Dim statusProcesso, interessado, assunto, descricao
+' ── DADOS DO PROCESSO ────────────────────────────────────
+Dim rsProc
+Set rsProc = dbQuery( _
+    "SELECT P.IdProcesso, P.NumeroProcesso, P.Assunto, P.Descricao, " & _
+    "       P.TipoProcesso, P.DataCriacao, P.Ativo, " & _
+    "       U.Nome AS CriadorNome, U.Matricula AS CriadorMatricula, " & _
+    "       T.IdTramitacao AS IdTramAtual, T.IdSetor AS IdSetorAtual, " & _
+    "       S.NomeSetor AS SetorAtual, T.DataEntrada AS EntradaSetorAtual, " & _
+    "       DATEDIFF(DAY, T.DataEntrada, GETDATE()) AS DiasNoSetor " & _
+    "FROM Processos P " & _
+    "INNER JOIN Usuarios U ON U.Matricula = P.MatriculaCriador " & _
+    "OUTER APPLY ( " & _
+    "   SELECT TOP 1 * FROM Tramitacoes " & _
+    "   WHERE IdProcesso = P.IdProcesso AND DataSaida IS NULL " & _
+    "   ORDER BY DataEntrada DESC " & _
+    ") T " & _
+    "OUTER APPLY ( " & _
+    "   SELECT NomeSetor FROM Setores WHERE IdSetor = T.IdSetor " & _
+    ") S " & _
+    "WHERE P.IdProcesso = " & idProcesso _
+)
 
-numeroProcesso = rsProc("NumeroProcesso")
-dataAbertura   = FormatDateTime(rsProc("DataCriacao"), 2)
-diasParado     = rsProc("DiasParado")
-assunto        = rsProc("Assunto")
-descricao      = rsProc("Descricao")
-interessado    = rsProc("MatriculaCriador")
-
-If IsNull(rsProc("IdSetor")) Then
-    setorAtual = "Finalizado"
-    statusProcesso = "Finalizado"
-Else
-    setorAtual = rsProc("NomeSetor")
-    statusProcesso = "Em andamento"
+If rsProc.EOF Then
+    Response.Redirect "lista.asp"
+    Response.End
 End If
 
+' Variáveis do processo
+Dim numProcesso, assunto, descricao, tipo
+Dim criadorNome, dataCriacao
+Dim idSetorAtual, setorAtual, diasNoSetor, idTramAtual
+Dim processoAtivo, processoFinalizado, statusAtual
 
-' =======================
-' LISTA DE SETORES DESTINO
-' =======================
-Dim sqlSetorDestino, rsSetorDestino
+numProcesso   = rsProc("NumeroProcesso")
+assunto       = rsProc("Assunto")
+descricao     = rsProc("Descricao")
+tipo          = rsProc("TipoProcesso")
+criadorNome   = rsProc("CriadorNome")
+dataCriacao   = rsProc("DataCriacao")
+processoAtivo = rsProc("Ativo")
 
-sqlSetorDestino = "SELECT IdSetor, NomeSetor FROM Setores ORDER BY NomeSetor"
-Set rsSetorDestino = conn.Execute(sqlSetorDestino)
-
-
-' =======================
-' CAMPOS OBRIGATORIOS POR SETOR
-' =======================
-Dim camposPorSetor
-Set camposPorSetor = Server.CreateObject("Scripting.Dictionary")
-
-' Definição dos campos que cada setor deve preencher
-camposPorSetor.Add 1, Array("descricao", "quantidade", "urgencia")          ' Setor Solicitante
-camposPorSetor.Add 2, Array("cotacoes", "fornecedor", "tipo_compra")        ' Compras
-camposPorSetor.Add 3, Array("impacto", "prioridade")                        ' Planejamento
-camposPorSetor.Add 4, Array("parecer_juridico")                             ' Licitação - SCL
-camposPorSetor.Add 5, Array("autorizacao", "centro_custo")                  ' Financeiro
-camposPorSetor.Add 6, Array("analise_admin")                                ' NAP
-camposPorSetor.Add 7, Array("numero_protocolo")                             ' Protocolo
-
-
-' =======================
-' PERMISSÕES DE AÇÃO
-' =======================
-Dim podeEncaminhar, podeFinalizar
-
-If statusProcesso = "Em andamento" Then
-    podeEncaminhar = True
-    podeFinalizar  = True
+' Define status corretamente (SEM coluna fake)
+If processoAtivo = False Or IsNull(rsProc("IdSetorAtual")) Then
+    statusAtual = "Finalizado"
+    processoFinalizado = True
 Else
-    podeEncaminhar = False
-    podeFinalizar  = False
+    statusAtual = "Em andamento"
+    processoFinalizado = False
 End If
 
+If IsNull(rsProc("IdSetorAtual")) Then
+    idSetorAtual = 0
+    setorAtual   = "Finalizado"
+    diasNoSetor  = 0
+    idTramAtual  = 0
+Else
+    idSetorAtual = rsProc("IdSetorAtual")
+    setorAtual   = rsProc("SetorAtual")
+    diasNoSetor  = rsProc("DiasNoSetor")
+    idTramAtual  = rsProc("IdTramAtual")
+End If
+
+rsProc.Close : Set rsProc = Nothing
+
+' ── SETORES DESTINO PERMITIDOS (do banco, não hard-coded) ─
+Dim rsDestinos
+Set rsDestinos = dbQuery( _
+    "SELECT F.IdSetorDestino, S.NomeSetor " & _
+    "FROM FluxoSetores F " & _
+    "INNER JOIN Setores S ON S.IdSetor = F.IdSetorDestino " & _
+    "WHERE F.IdSetorOrigem = " & idSetorAtual & " AND F.Ativo = 1 " & _
+    "ORDER BY S.NomeSetor")
+
+' ── HISTÓRICO DE TRAMITAÇÕES ─────────────────────────────
+Dim rsHist
+Set rsHist = dbQuery( _
+    "SELECT T.IdTramitacao, T.IdSetor, S.NomeSetor, T.MatriculaUsuario, " & _
+    "       U.Nome AS UsuarioNome, T.Observacao, " & _
+    "       T.DataEntrada, T.DataSaida, " & _
+    "       DATEDIFF(DAY, T.DataEntrada, ISNULL(T.DataSaida, GETDATE())) AS DiasNoSetor " & _
+    "FROM Tramitacoes T " & _
+    "INNER JOIN Setores S ON T.IdSetor = S.IdSetor " & _
+    "INNER JOIN Usuarios U ON U.Matricula = T.MatriculaUsuario " & _
+    "WHERE T.IdProcesso = " & idProcesso & " " & _
+    "ORDER BY T.DataEntrada DESC")
+
+' ── DETALHES DE CADA TRAMITAÇÃO ──────────────────────────
+' Monta dicionário: IdTramitacao → array de "campo: valor"
+Dim rsDet
+Set rsDet = dbQuery( _
+    "SELECT TD.IdTramitacao, TD.Campo, TD.Valor " & _
+    "FROM TramitacaoDetalhes TD " & _
+    "INNER JOIN Tramitacoes T ON T.IdTramitacao = TD.IdTramitacao " & _
+    "WHERE T.IdProcesso = " & idProcesso & " " & _
+    "ORDER BY TD.IdTramitacao, TD.IdDetalhe")
+
+' Guarda os detalhes em arrays indexados por IdTramitacao
+Dim dicDetalhes
+Set dicDetalhes = Server.CreateObject("Scripting.Dictionary")
+Do While Not rsDet.EOF
+    Dim tramId : tramId = CStr(rsDet("IdTramitacao"))
+    Dim linha  : linha  = rsDet("Campo") & ": " & rsDet("Valor")
+    If dicDetalhes.Exists(tramId) Then
+        dicDetalhes(tramId) = dicDetalhes(tramId) & "||" & linha
+    Else
+        dicDetalhes.Add tramId, linha
+    End If
+    rsDet.MoveNext
+Loop
+rsDet.Close : Set rsDet = Nothing
+
+' ── PERMISSÕES ───────────────────────────────────────────
+Dim podeAgir : podeAgir = Not processoFinalizado
+
+Dim pageTitulo  : pageTitulo  = "Processo " & numProcesso
+Dim paginaAtiva : paginaAtiva = "processos"
+
+' ── FUNÇÃO STATUS SETOR ───────────────────────────────────────────
+Function badgeStatus(status)
+    status = LCase(Trim(status))
+
+    Select Case status
+        Case "finalizado"
+            badgeStatus = "badge-success"
+        Case "em andamento"
+            badgeStatus = "badge-primary"
+        Case Else
+            badgeStatus = "badge-secondary"
+    End Select
+End Function
+
+' ── FUNÇÃO SLA  ───────────────────────────────────────────
+Function badgeSLA(dias)
+
+    If IsNull(dias) Then
+        badgeSLA = "badge badge-neutral"
+        Exit Function
+    End If
+
+    If dias <= SLA_ALERTA_DIAS Then
+        badgeSLA = "badge badge-success"
+    ElseIf dias <= (SLA_ALERTA_DIAS + 3) Then
+        badgeSLA = "badge badge-warning"
+    Else
+        badgeSLA = "badge badge-danger"
+    End If
+
+End Function
+
+
+Function fmtDataHora(dt)
+    If IsNull(dt) Or dt = "" Then
+        fmtDataHora = "-"
+        Exit Function
+    End If
+
+    If Not IsDate(dt) Then
+        fmtDataHora = "-"
+        Exit Function
+    End If
+
+    fmtDataHora = _
+        Day(dt) & "/" & _
+        Right("0" & Month(dt), 2) & "/" & _
+        Year(dt) & " " & _
+        Right("0" & Hour(dt), 2) & ":" & _
+        Right("0" & Minute(dt), 2)
+End Function
 %>
+<!--#include file="../includes/layout.asp"-->
 
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-    <meta charset="utf-8">
-    <title>SisProc - Visualizar Processo</title>
-    <link rel="stylesheet" href="<%=APP_PATH%>/assets/css/dashboard.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-</head>
+<!-- ALERT MENSAGEM -->
+<% If Request.QueryString("msg") = "criado" Then %>
+<div class="alert alert-success"><i class="fa-solid fa-circle-check"></i> Processo criado com sucesso e encaminhado ao Protocolo!</div>
+<% End If %>
 
-<body>
-
-<!-- ================= TOPO ================= -->
-<header class="topbar">
-    <div class="top-brand">
-        <strong>SisProc</strong>
+<!-- HEADER DA PÁGINA -->
+<div class="page-header">
+    <h1>
+        <a href="lista.asp" class="btn-back"><i class="fa-solid fa-arrow-left"></i></a>
+        <i class="fa-solid fa-file-lines"></i>
+        Processo <%=numProcesso%>
+    </h1>
+    <div class="page-actions">
+        <a href="imprimir.asp?id=<%=idProcesso%>" target="_blank" class="btn btn-ghost btn-sm">
+            <i class="fa-solid fa-print"></i> Imprimir
+        </a>
     </div>
+</div>
 
-    <div class="top-toggle">
-        <button class="btn-menu" onclick="toggleMenu()">☰</button>
-    </div>
+<!-- ALERTA SLA -->
+<% If diasNoSetor >= SLA_ALERTA_DIAS And Not processoFinalizado Then %>
+<div class="sla-alert-bar">
+    <i class="fa-solid fa-triangle-exclamation"></i>
+    Processo parado há <strong><%=diasNoSetor%> dias</strong> no setor <strong><%=setorAtual%></strong>
+</div>
+<% End If %>
 
-    <div class="top-right">
-        <span class="user"><i class="fa-solid fa-user"></i> <%=Session("Nome")%></span>
-        <a href="<%=APP_PATH%>/auth/logout.asp" class="btn-logout">Sair</a>
-    </div>
-</header>
+<!-- BOTÕES DE AÇÃO -->
+<% If podeAgir Then %>
+<div class="action-bar">
+    <% If Not rsDestinos.EOF Then %>
+    <button onclick="abrirModal('modalEncaminhar')" class="btn btn-primary">
+        <i class="fa-solid fa-share"></i> Encaminhar
+    </button>
+    <% End If %>
 
-<div class="layout" id="layout">
+    <button onclick="abrirModal('modalDevolver')" class="btn btn-warning">
+        <i class="fa-solid fa-rotate-left"></i> Devolver
+    </button>
 
-    <!-- ================= SIDEBAR ================= -->
-    <aside class="sidebar">
-        <nav>
-            <a href="<%=APP_PATH%>/index.asp">
-                <span class="icon"><i class="fa-solid fa-house"></i></span>
-                <span class="text">Dashboard</span>
-            </a>
+    <% If sessIsAdmin Then %>
+    <a href="finalizar.asp?id=<%=idProcesso%>"
+       class="btn btn-success"
+       onclick="return confirm('Confirmar finalização deste processo?')">
+        <i class="fa-solid fa-check-circle"></i> Finalizar
+    </a>
+    <% End If %>
+</div>
+<% End If %>
 
-            <a href="<%=APP_PATH%>/processos/lista.asp" class="active">
-                <span class="icon"><i class="fa-solid fa-folder-open"></i></span>
-                <span class="text">Processos</span>
-            </a>
-
-            <% If Session("IdPerfil") = 1 Then %>
-                <a href="<%=APP_PATH%>/usuarios/lista.asp">
-                    <span class="icon"><i class="fa-solid fa-users"></i></span>
-                    <span class="text">Usuários</span>
-                </a>
-            <% End If %>
-        </nav>
-    </aside>
-
-    <!-- ================= CONTEÚDO ================= -->
-    <main class="content">
-
-        <!-- HEADER DA PÁGINA -->
-        <div class="page-header process-header">
-            <div class="header-left">
-                <a href="javascript:history.back()" class="btn-back">
-                    <i class="fa-solid fa-arrow-left"></i>
-                </a>
-
-                <h1>
-                    <i class="fa-solid fa-file-lines"></i>
-                    Processo <%=numeroProcesso%>
-                </h1>
-            </div>
+<!-- DADOS DO PROCESSO -->
+<div class="card-box">
+    <div class="card-box-title"><i class="fa-solid fa-circle-info"></i> Dados do Processo</div>
+    <div class="detail-grid">
+        <div class="detail-item">
+            <label>Número</label>
+            <span style="font-family:var(--font-mono);color:var(--primary);font-weight:700"><%=numProcesso%></span>
         </div>
-
- 
-        <!-- Botoes de encaminhar -->
-        <div class="action-bar">
-
-            <% If podeEncaminhar Then %>
-                <button onclick="abrirEncaminhar()" class="btn-action primary">
-                    <i class="fa-solid fa-share"></i> Encaminhar
-                </button>
-
-                <button onclick="abrirDevolver()" class="btn-action warning">
-                    <i class="fa-solid fa-rotate-left"></i> Devolver
-                </button>
-            <% End If %>
-
-            <% If podeFinalizar Then %>
-                <a href="finalizar.asp?id=1"
-                class="btn-action success"
-                onclick="return confirm('Deseja finalizar este processo?')">
-                    <i class="fa-solid fa-check"></i> Finalizar
-                </a>
-            <% End If %>
-
-            <a href="imprimir.asp?id=1" target="_blank" class="btn-action neutral">
-                <i class="fa-solid fa-print"></i> Imprimir
-            </a>
-
+        <div class="detail-item">
+            <label>Tipo</label>
+            <span><span class="badge badge-tipo"><%=tipo%></span></span>
         </div>
-
-
-        <!-- ===== ALERTA SLA ===== -->
-        <% If diasParado >= 5 Then %>
-            <div class="sla-alert">
-                <i class="fa-solid fa-triangle-exclamation"></i>
-                Processo parado há <strong><%=diasParado%> dias</strong> no setor atual
-            </div>
+        <div class="detail-item">
+            <label>Status</label>
+            <span><span class="badge <%=badgeStatus(statusAtual)%>"><%=statusAtual%></span></span>
+        </div>
+        <div class="detail-item">
+            <label>Setor Atual</label>
+            <span><span class="badge badge-setor"><%=setorAtual%></span></span>
+        </div>
+        <div class="detail-item">
+            <label>Dias no Setor</label>
+            <span class="<%=badgeSLA(diasNoSetor)%>"><%=diasNoSetor%> dias</span>
+        </div>
+        <div class="detail-item">
+            <label>Data de Abertura</label>
+            <span><%=fmtData(dataCriacao)%></span>
+        </div>
+        <% If processoFinalizado Then %>
+        <div class="detail-item">
+            <label>Data de Finalização</label>
+            <span><%=fmtData(dataFinaliz)%></span>
+        </div>
         <% End If %>
-
-
-        <!-- ===== DADOS DO PROCESSO ===== -->
-        <div class="card-box">
-
-            <div class="card-title">
-                <i class="fa-solid fa-circle-info"></i>
-                Dados do Processo
-            </div>
-
-            <div class="process-grid">
-                <div>
-                    <strong>Número</strong><br>
-                    <%=numeroProcesso%>
-                </div>
-
-                <div>
-                    <strong>Status</strong><br>
-                    <span class="status aberto"><%=statusProcesso%></span>
-                </div>
-
-                <div>
-                    <strong>Data de Abertura</strong><br>
-                    <%=dataAbertura%>
-                </div>
-
-                <div>
-                    <strong>Setor Atual</strong><br>
-                    <%=setorAtual%>
-                </div>
-
-                <div>
-                    <strong>Interessado</strong><br>
-                    <%=interessado%>
-                </div>
-            </div>
-
+        <div class="detail-item">
+            <label>Criado por</label>
+            <span><%=criadorNome%></span>
         </div>
+    </div>
+    <% If Not IsNull(assunto) And assunto <> "" Then %>
+    <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Assunto</div>
+        <div><%=Server.HtmlEncode(assunto)%></div>
+    </div>
+    <% End If %>
+    <% If Not IsNull(descricao) And descricao <> "" Then %>
+    <div style="margin-top:12px">
+        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Descrição</div>
+        <div style="color:var(--text-muted)"><%=Server.HtmlEncode(descricao)%></div>
+    </div>
+    <% End If %>
+</div>
 
-        <!-- ===== DESCRIÇÃO ===== -->
-        <div class="card-box">
-            <h3><%=assunto%></h3>
-            <p class="process-text"><%=descricao%></p>
-        </div>
-
+<!-- HISTÓRICO DE TRAMITAÇÕES -->
+<div class="card-box">
+    <div class="card-box-title"><i class="fa-solid fa-timeline"></i> Histórico de Tramitações</div>
+    <div class="timeline">
+    <% Dim primeiroItem : primeiroItem = True %>
+    <% Do While Not rsHist.EOF %>
         <%
-        Dim sqlHist, rsHist
+        Dim tipoMov
+        Dim tramIdH  : tramIdH  = CStr(rsHist("IdTramitacao"))
+        Dim isAtual  : isAtual  = IsNull(rsHist("DataSaida"))
 
-        sqlHist = "SELECT T.IdTramitacao, T.DataEntrada, T.DataSaida, T.Observacao, " & _
-          "T.IdSetor, SE.NomeSetor, T.MatriculaUsuario " & _
-          "FROM Tramitacoes T " & _
-          "INNER JOIN Setores SE ON SE.IdSetor = T.IdSetor " & _
-          "WHERE T.IdProcesso = " & idProcesso & " " & _
-          "ORDER BY T.DataEntrada ASC"
-        'response.write sqlHist 
-        'response.end
-        Set rsHist = conn.Execute(sqlHist)
-        %>
-
-        <!-- ===== HISTÓRICO ===== -->
-        <div class="card-box">
-
-            <div class="card-title">
-                <i class="fa-solid fa-clock-rotate-left"></i>
-                Histórico de Tramitação
-            </div>
-
-            <ul class="timeline">
-
-        <%
-        Dim dataEntrada, dataSaida, dias
-
-        If rsHist.EOF Then
-        %>
-            <li>Nenhuma movimentação registrada.</li>
-        <%
+        ' Define o tipo do movimento SEM coluna no banco
+        If isAtual Then
+            tipoMov = "encaminhar"
         Else
-            Do While Not rsHist.EOF
-                dataEntrada = rsHist("DataEntrada")
-                dataSaida = rsHist("DataSaida")
-
-                ' Calcula dias no setor
-                If IsNull(dataSaida) Or dataSaida = "" Then
-                    dias = DateDiff("d", dataEntrada, Now())
-                Else
-                    dias = DateDiff("d", dataEntrada, dataSaida)
-                End If
-        %>
-                <li>
-                    <span class="date"><%=FormatDateTime(dataEntrada, 2)%></span>
-                    <strong>Tramitação</strong><br>
-
-                    Setor <%=rsHist("NomeSetor")%><br>
-
-                    <% If Not IsNull(rsHist("Observacao")) Then %>
-                        <em><%=rsHist("Observacao")%></em><br>
-                    <% End If %>
-
-                    <%
-                    Dim sqlDet, rsDet
-
-                    sqlDet = "SELECT Campo, Valor FROM TramitacaoDetalhes " & _
-                            "WHERE IdTramitacao = " & rsHist("IdTramitacao")
-
-                    Set rsDet = conn.Execute(sqlDet)
-
-                    If Not rsDet.EOF Then
-                    %>
-                        <ul class="detalhes-tramitacao">
-                            <% Do While Not rsDet.EOF %>
-                                <li>
-                                    <strong><%=rsDet("Campo")%>:</strong>
-                                    <%=rsDet("Valor")%>
-                                </li>
-                            <% 
-                                rsDet.MoveNext
-                            Loop %>
-                        </ul>
-                    <%
-                    End If
-
-                    rsDet.Close
-                    Set rsDet = Nothing
-                    %>
-
-                    <small>
-                        ⏱
-                        <% If IsNull(dataSaida) Or dataSaida = "" Then %>
-                            em andamento (<%=dias%> dias)
-                        <% Else %>
-                            <%=dias%> dias no setor
-                        <% End If %>
-                    </small>
-                </li>
-        <%
-                rsHist.MoveNext
-            Loop
+            tipoMov = "finalizar"
         End If
 
-        rsHist.Close
-        Set rsHist = Nothing
+        Dim dotClass : dotClass = tipoMov
+        If isAtual And primeiroItem Then dotClass = "atual"
+        primeiroItem = False
         %>
-                    </ul>
+        <div class="timeline-item">
+            <div class="timeline-dot <%=dotClass%>"></div>
+            <div class="timeline-card <%If isAtual And dotClass="atual" Then Response.Write "atual"%>">
+                <div class="timeline-header">
+                    <div>
+                        <div class="timeline-setor">
+                            <% If tipoMov = "devolver" Then %>
+                                <i class="fa-solid fa-rotate-left" style="color:var(--warning)"></i>
+                            <% ElseIf tipoMov = "finalizar" Then %>
+                                <i class="fa-solid fa-check-circle" style="color:var(--success)"></i>
+                            <% Else %>
+                                <i class="fa-solid fa-share" style="color:var(--primary)"></i>
+                            <% End If %>
+                            <%=rsHist("NomeSetor")%>
+                            <% If isAtual And dotClass="atual" Then %>
+                                <span class="badge badge-andamento" style="font-size:10px">Atual</span>
+                            <% End If %>
+                        </div>
+                        <div class="timeline-data">
+                            <i class="fa-regular fa-calendar"></i>
+                            <%=fmtDataHora(rsHist("DataEntrada"))%>
+                            <% If Not IsNull(rsHist("DataSaida")) Then %>
+                                → <%=fmtDataHora(rsHist("DataSaida"))%>
+                            <% End If %>
+                            &nbsp;·&nbsp; <%=rsHist("UsuarioNome")%>
+                        </div>
+                    </div>
+                    <span class="timeline-dias"><%=rsHist("DiasNoSetor")%> dia(s)</span>
+                </div>
+                <% If Not IsNull(rsHist("Observacao")) And rsHist("Observacao") <> "" Then %>
+                <div class="timeline-obs">
+                    <i class="fa-regular fa-comment"></i> <%=Server.HtmlEncode(rsHist("Observacao"))%>
+                </div>
+                <% End If %>
+                <%
+                ' Exibe detalhes da tramitação se existirem
+                If dicDetalhes.Exists(tramIdH) Then
+                    Dim detArr : detArr = Split(dicDetalhes(tramIdH), "||")
+                    Dim det
+                %>
+                <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border);display:flex;flex-wrap:wrap;gap:8px">
+                <% For Each det In detArr %>
+                    <span style="font-size:11.5px;background:var(--neutral-bg);padding:2px 8px;border-radius:4px;color:var(--text-muted)">
+                        <%=Server.HtmlEncode(det)%>
+                    </span>
+                <% Next %>
+                </div>
+                <% End If %>
+            </div>
+        </div>
+    <% rsHist.MoveNext : Loop %>
+    </div>
+</div>
 
+<%
+rsHist.Close : Set rsHist = Nothing
+%>
+
+<!-- ===== MODAL ENCAMINHAR ===== -->
+<div id="modalEncaminhar" class="modal-overlay" onclick="fecharSeOverlay(event,'modalEncaminhar')">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3><i class="fa-solid fa-share" style="color:var(--primary)"></i> Encaminhar Processo</h3>
+            <button class="modal-close" onclick="fecharModal('modalEncaminhar')"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <form method="post" action="encaminhar.asp" id="formEncaminhar">
+            <div class="modal-body">
+                <input type="hidden" name="id_processo" value="<%=idProcesso%>">
+
+                <div class="form-group">
+                    <label>Encaminhar para <span style="color:var(--danger)">*</span></label>
+                    <select name="setor_destino" required id="selDestino" onchange="mostrarCampos(this.value)">
+                        <option value="">Selecione o setor...</option>
+                        <%
+                        Do While Not rsDestinos.EOF
+                        %>
+                            <option value="<%=rsDestinos("IdSetorDestino")%>"><%=rsDestinos("NomeSetor")%></option>
+                        <% rsDestinos.MoveNext : Loop %>
+                    </select>
                 </div>
 
-            </main>
-        </div>
+                <div class="form-group">
+                    <label>Observação</label>
+                    <textarea name="observacao" rows="3" placeholder="Observações sobre o encaminhamento..."></textarea>
+                </div>
 
+                <!-- Campos dinâmicos por setor destino -->
 
+                <!-- SETOR SOLICITANTE (2) -->
+                <div class="campos-setor" id="campos-2">
+                    <div class="campos-setor-titulo">Informações do Setor Solicitante</div>
+                    <div class="form-group">
+                        <label>Descrição do Pedido</label>
+                        <textarea name="descricao" rows="3"></textarea>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Quantidade</label>
+                            <input type="number" name="quantidade" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>Urgência</label>
+                            <select name="urgencia">
+                                <option value="">Selecione</option>
+                                <option>Normal</option>
+                                <option>Urgente</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
 
-<script>
-// Funções para abrir e fechar modais
-function abrirEncaminhar() {
-    const select = document.querySelector('select[name="setor_destino"]');
-    const opcoes = select.querySelectorAll('option');
+                <!-- COMPRAS (3) -->
+                <div class="campos-setor" id="campos-3">
+                    <div class="campos-setor-titulo">Informações de Compras</div>
+                    <div class="form-group">
+                        <label>Fornecedor</label>
+                        <input type="text" name="fornecedor">
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Nº de Cotações</label>
+                            <input type="number" name="cotacoes" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Tipo de Compra</label>
+                            <select name="tipo_compra">
+                                <option value="">Selecione</option>
+                                <option>Licitação</option>
+                                <option>Dispensa</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
 
-    // esconde tudo
-    opcoes.forEach(opt => {
-        if (opt.value !== "") opt.style.display = "none";
-    });
+                <!-- PLANEJAMENTO (4) -->
+                <div class="campos-setor" id="campos-4">
+                    <div class="campos-setor-titulo">Informações de Planejamento</div>
+                    <div class="form-group">
+                        <label>Análise de Planejamento</label>
+                        <textarea name="analise_planejamento" rows="3"></textarea>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Impacto</label>
+                            <select name="impacto">
+                                <option value="">Selecione</option>
+                                <option>Baixo</option>
+                                <option>Médio</option>
+                                <option>Alto</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Prioridade</label>
+                            <select name="prioridade">
+                                <option value="">Selecione</option>
+                                <option>Normal</option>
+                                <option>Alta</option>
+                                <option>Urgente</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
 
-    // mostra apenas os permitidos
-    if (fluxoSetores[setorAtual]) {
-        fluxoSetores[setorAtual].forEach(id => {
-            const opt = select.querySelector(`option[value="${id}"]`);
-            if (opt) opt.style.display = "block";
-        });
-    }
+                <!-- LICITAÇÃO SCL (5) -->
+                <div class="campos-setor" id="campos-5">
+                    <div class="campos-setor-titulo">Informações da Licitação (SCL)</div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Nº do Processo Licitatório</label>
+                            <input type="text" name="numero_edital">
+                        </div>
+                        <div class="form-group">
+                            <label>Modalidade</label>
+                            <select name="modalidade">
+                                <option value="">Selecione</option>
+                                <option>Pregão Eletrônico</option>
+                                <option>Pregão Presencial</option>
+                                <option>Concorrência</option>
+                                <option>Dispensa</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Parecer Jurídico</label>
+                        <textarea name="parecer_juridico" rows="2"></textarea>
+                    </div>
+                </div>
 
-    select.value = "";
-    mostrarCamposPorDestino();
+                <!-- FINANCEIRO (6) -->
+                <div class="campos-setor" id="campos-6">
+                    <div class="campos-setor-titulo">Informações do Financeiro</div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Centro de Custo</label>
+                            <input type="text" name="centro_custo">
+                        </div>
+                        <div class="form-group">
+                            <label>Autorização</label>
+                            <select name="autorizacao">
+                                <option value="">Selecione</option>
+                                <option>Aprovado</option>
+                                <option>Reprovado</option>
+                                <option>Pendente</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
 
-    document.getElementById("modalEncaminhar").classList.add("active");
-}
-
-function fecharModal() {
-    document.getElementById("modalEncaminhar").classList.remove("active");
-}
-
-function abrirDevolver() {
-    document.getElementById("modalDevolver").classList.add("active");
-}
-
-function fecharDevolver() {
-    document.getElementById("modalDevolver").classList.remove("active");
-}
-
-// Função para mostrar/ocultar campos obrigatórios conforme setor selecionado
-function mostrarCamposPorDestino() {
-
-    const setorDestino = document.querySelector('select[name="setor_destino"]').value;
-
-    document.querySelectorAll('.campos-setor').forEach(div => {
-        div.style.display = 'none';
-    });
-
-    if (setorDestino) {
-        const bloco = document.querySelector(
-            '.campos-setor[data-setor="' + setorDestino + '"]'
-        );
-        if (bloco) bloco.style.display = 'block';
-    }
-}
-
-/*/ Função para mostrar/ocultar campos obrigatórios conforme setor selecionado
-function mostrarCamposSetorAtual() {
-    document.querySelectorAll('.campos-setor').forEach(div => {
-        div.style.display = 'none';
-    });
-
-    if (setorAtual) {
-        const bloco = document.querySelector(
-            '.campos-setor[data-setor="' + setorAtual + '"]'
-        );
-        if (bloco) bloco.style.display = 'block';
-    }
-}*/
-
-
-// Variável para o setor atual do processo
-const setorAtual = "<%=rsProc("IdSetor")%>";
-
-const fluxoSetores = {
-    1: [2],            // Protocolo → Setor Solicitante
-    2: [3],            // Solicitante → Compras
-    3: [4, 5, 6],      // Compras → Planejamento / Licitação / Financeiro
-    4: [3],            // Planejamento → Compras
-    5: [3],            // Licitação → Compras
-    6: [7],            // Financeiro → NAP
-    7: [6]             // NAP → Financeiro
-};
-
-</script>
-
-<!-- ===== MODAL DE ENCAMINHAR ===== -->
-<div id="modalEncaminhar" class="modal" onclick="fecharModal()">
-    <div class="modal-box" onclick="event.stopPropagation()">
-
-        <div class="modal-header">
-            <h3>Encaminhar Processo</h3>
-            <button type="button" class="modal-close" onclick="fecharModal()">
-                <i class="fa-solid fa-xmark"></i>
-            </button>
-        </div>
-
-        <form method="post" action="encaminhar.asp">
-
-            <input type="hidden" name="id_processo" value="<%=idProcesso%>">
-
-            <!-- ================= SELECT DE DESTINO ================= -->
-            <label>Encaminhar para</label>
-            <select name="setor_destino" class="styled-input" required onchange="mostrarCamposPorDestino()">
-                <option value="">Selecione um setor</option>
-                <% Do While Not rsSetorDestino.EOF %>
-                    <option value="<%=rsSetorDestino("IdSetor")%>">
-                        <%=rsSetorDestino("NomeSetor")%>
-                    </option>
-                <% 
-                    rsSetorDestino.MoveNext
-                Loop %>
-            </select>
-
-            <!-- ================= PROTOCOLO ================= -->
-            <div class="campos-setor" data-setor="1" style="display:none">
-                <label>Observação do Protocolo</label>
-                <textarea name="obs_protocolo"></textarea>
-            </div>
-
-            <!-- ================= SETOR SOLICITANTE ================= -->
-            <div class="campos-setor" data-setor="2" style="display:none">
-                <label>Descrição do Pedido</label>
-                <textarea name="descricao"></textarea>
-
-                <label>Quantidade</label>
-                <input type="number" name="quantidade">
-
-                <label>Urgência</label>
-                <select name="urgencia">
-                    <option value="">Selecione</option>
-                    <option>Normal</option>
-                    <option>Urgente</option>
-                </select>
-            </div>
-
-            <!-- ================= COMPRAS ================= -->
-            <div class="campos-setor" data-setor="3" style="display:none">
-                <label>Fornecedor</label>
-                <input type="text" name="fornecedor">
-
-                <label>Cotações</label>
-                <input type="number" name="cotacoes">
-
-                <label>Tipo de Compra</label>
-                <select name="tipo_compra">
-                    <option value="">Selecione</option>
-                    <option>Licitação</option>
-                    <option>Dispensa</option>
-                </select>
-            </div>
-            <!-- ================= PLANEJAMENTO ================= -->
-            <div class="campos-setor" data-setor="4" style="display:none">
-                <label>Fornecedor</label>
-                <input type="text" name="fornecedor">
-
-                <label>Cotações</label>
-                <textarea name="cotacoes"></textarea>
-
-                <label>Tipo de Compra</label>
-                <select name="tipo_compra">
-                    <option value="">Selecione</option>
-                    <option>Dispensa</option>
-                    <option>Licitação</option>
-                </select>
+                <!-- NAP (7) -->
+                <div class="campos-setor" id="campos-7">
+                    <div class="campos-setor-titulo">Informações do NAP</div>
+                    <div class="form-group">
+                        <label>Análise / Providência</label>
+                        <textarea name="providencia_nap" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Status NAP</label>
+                        <select name="status_nap">
+                            <option value="">Selecione</option>
+                            <option>Aprovado</option>
+                            <option>Pendente</option>
+                            <option>Devolvido</option>
+                        </select>
+                    </div>
+                </div>
 
             </div>
-
-            <!-- ================= FINANCEIRO ================= -->
-            <div class="campos-setor" data-setor="5" style="display:none">
-                <label>Autorização Financeira</label>
-                <select name="autorizacao">
-                    <option value="">Selecione</option>
-                    <option>Aprovado</option>
-                    <option>Reprovado</option>
-                </select>
-
-                <label>Centro de Custo</label>
-                <input type="text" name="centro_custo">
-            </div>
-
-            <!-- ================= LICITAÇÃO (SCL) ================= -->
-            <div class="campos-setor" data-setor="6" style="display:none">
-                <label>Número do Processo Licitatório</label>
-                <input type="text" name="num_licitacao">
-
-                <label>Modalidade</label>
-                <select name="modalidade">
-                    <option value="">Selecione</option>
-                    <option>Pregão</option>
-                    <option>Concorrência</option>
-                    <option>Dispensa</option>
-                </select>
-            </div>
-
-            <!-- ================= NAP ================= -->
-            <div class="campos-setor" data-setor="7" style="display:none">
-                <label>Análise do NAP</label>
-                <textarea name="analise_nap"></textarea>
-
-                <label>Status</label>
-                <select name="status_nap">
-                    <option value="">Selecione</option>
-                    <option>Aprovado</option>
-                    <option>Pendente</option>
-                </select>
-            </div>
-
-            <!-- ================= BOTÕES ================= -->
-            <div class="modal-actions">
-                <button type="submit" class="btn-action primary">
+            <div class="modal-footer">
+                <button type="button" class="btn btn-ghost" onclick="fecharModal('modalEncaminhar')">Cancelar</button>
+                <button type="submit" class="btn btn-primary">
                     <i class="fa-solid fa-share"></i> Confirmar Encaminhamento
                 </button>
-
-                <button type="button" class="btn-action secondary" onclick="fecharModal()">
-                    Cancelar
-                </button>
             </div>
-
         </form>
     </div>
 </div>
 
-<!-- ===== MODAL DE DEVOLVER ===== -->
-<div id="modalDevolver" class="modal" onclick="fecharDevolver()">
-    <div class="modal-box" onclick="event.stopPropagation()">
-
+<!-- ===== MODAL DEVOLVER ===== -->
+<div id="modalDevolver" class="modal-overlay" onclick="fecharSeOverlay(event,'modalDevolver')">
+    <div class="modal-box">
         <div class="modal-header">
-            <h3>Devolver Processo</h3>
-            <button type="button" class="modal-close" onclick="fecharDevolver()">
-                <i class="fa-solid fa-xmark"></i>
-            </button>
+            <h3><i class="fa-solid fa-rotate-left" style="color:var(--warning)"></i> Devolver Processo</h3>
+            <button class="modal-close" onclick="fecharModal('modalDevolver')"><i class="fa-solid fa-xmark"></i></button>
         </div>
-
         <form method="post" action="devolver.asp">
+            <div class="modal-body">
+                <input type="hidden" name="id_processo" value="<%=idProcesso%>">
 
-            <input type="hidden" name="id_processo" value="<%=idProcesso%>">
+                <%
+                ' Busca o setor anterior (último com DataSaida preenchida, diferente do atual)
+                Dim rsAnterior
+                Set rsAnterior = dbQuery( _
+                    "SELECT TOP 1 T.IdSetor, S.NomeSetor " & _
+                    "FROM Tramitacoes T " & _
+                    "INNER JOIN Setores S ON S.IdSetor = T.IdSetor " & _
+                    "WHERE T.IdProcesso = " & idProcesso & _
+                    "  AND T.IdSetor <> " & idSetorAtual & _
+                    "  AND T.DataSaida IS NOT NULL " & _
+                    "ORDER BY T.DataEntrada DESC")
 
-            <%
-            ' Busca o último setor antes do atual
-            Dim sqlUltimoSetor, rsUltimoSetor, setorAnterior, nomeSetorAnterior
+                Dim idSetorAnterior, nomeSetorAnterior
+                If Not rsAnterior.EOF Then
+                    idSetorAnterior   = rsAnterior("IdSetor")
+                    nomeSetorAnterior = rsAnterior("NomeSetor")
+                Else
+                    idSetorAnterior   = idSetorAtual
+                    nomeSetorAnterior = setorAtual & " (sem histórico anterior)"
+                End If
+                rsAnterior.Close : Set rsAnterior = Nothing
+                %>
 
-            sqlUltimoSetor = "SELECT TOP 1 T.IdSetor, SE.NomeSetor FROM Tramitacoes T " & _
-                              "INNER JOIN Setores SE ON SE.IdSetor = T.IdSetor " & _
-                              "WHERE T.IdProcesso = " & idProcesso & " AND T.IdSetor <> " & rsProc("IdSetor") & " " & _
-                              "ORDER BY T.DataEntrada DESC"
-            Set rsUltimoSetor = conn.Execute(sqlUltimoSetor)
+                <div class="form-group">
+                    <label>Devolver para</label>
+                    <input type="text" value="<%=nomeSetorAnterior%>" disabled style="background:var(--bg)">
+                    <input type="hidden" name="setor_destino" value="<%=idSetorAnterior%>">
+                </div>
 
-            If Not rsUltimoSetor.EOF Then
-                setorAnterior = rsUltimoSetor("IdSetor")
-                nomeSetorAnterior = rsUltimoSetor("NomeSetor")
-            Else
-                setorAnterior = ""
-                nomeSetorAnterior = "Protocolo" ' default caso não tenha histórico
-            End If
+                <div class="form-group">
+                    <label>Motivo da Devolução <span style="color:var(--danger)">*</span></label>
+                    <textarea name="observacao" rows="4" required placeholder="Descreva o motivo da devolução..."></textarea>
+                </div>
 
-            rsUltimoSetor.Close
-            Set rsUltimoSetor = Nothing
-            %>
-
-            <label>Devolver para</label>
-            <input type="text" class="styled-input" value="<%=nomeSetorAnterior%>" disabled>
-            <input type="hidden" name="setor_destino" value="<%=setorAnterior%>">
-
-            <label>Motivo da devolução</label>
-            <textarea name="observacao" rows="4" required placeholder="Informe o motivo da devolução..."></textarea>
-
-            <div class="modal-actions">
-                <button type="submit" class="btn-action warning">
-                    <i class="fa-solid fa-rotate-left"></i> Devolver
-                </button>
-                <button type="button" class="btn-action secondary" onclick="fecharDevolver()">Cancelar</button>
             </div>
-
+            <div class="modal-footer">
+                <button type="button" class="btn btn-ghost" onclick="fecharModal('modalDevolver')">Cancelar</button>
+                <button type="submit" class="btn btn-warning">
+                    <i class="fa-solid fa-rotate-left"></i> Confirmar Devolução
+                </button>
+            </div>
         </form>
     </div>
 </div>
-<!-- ================= FOOTER ================= -->
-<footer class="footer">
-    SisProc © <%=Year(Now())%> - Sistema de Acompanhamento de Processos
-</footer>
+
+<script>
+function abrirModal(id) {
+    document.getElementById(id).classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+function fecharModal(id) {
+    document.getElementById(id).classList.remove('open');
+    document.body.style.overflow = '';
+}
+function fecharSeOverlay(e, id) {
+    if (e.target === document.getElementById(id)) fecharModal(id);
+}
+
+// Mostrar campos dinâmicos conforme setor destino selecionado
+function mostrarCampos(idSetor) {
+    document.querySelectorAll('.campos-setor').forEach(el => el.classList.remove('ativo'));
+    if (idSetor) {
+        var el = document.getElementById('campos-' + idSetor);
+        if (el) el.classList.add('ativo');
+    }
+}
+</script>
+
 <%
-If Not rsSetorDestino Is Nothing Then
-    rsSetorDestino.Close
-    Set rsSetorDestino = Nothing
-End If
+Call fechaConexao
 %>
-</body>
-</html>
+<!--#include file="../includes/layout_footer.asp"-->

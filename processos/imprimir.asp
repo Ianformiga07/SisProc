@@ -1,197 +1,126 @@
+<%@LANGUAGE="VBSCRIPT" CODEPAGE="65001"%>
+<%
+Response.CodePage = 65001
+Response.Charset  = "UTF-8"
+%>
+<!--#include file="../config/app.asp"-->
+<!--#include file="../Lib/Conexao.asp"-->
+<!--#include file="../includes/seguranca.asp"-->
+<%
+Call abreConexao
+
+Dim idProcesso : idProcesso = dbInt(Request.QueryString("id"))
+If idProcesso = 0 Then Response.Redirect "lista.asp" : Response.End
+
+' Dados do processo
+Dim rsProc
+Set rsProc = dbQuery( _
+    "SELECT P.*, U.Nome AS CriadorNome, " & _
+    "       ISNULL(S.NomeSetor,'Finalizado') AS SetorAtual, " & _
+    "       DATEDIFF(DAY, P.DataCriacao, GETDATE()) AS DiasTotal " & _
+    "FROM Processos P " & _
+    "INNER JOIN Usuarios U ON P.IdUsuarioCriador = U.IdUsuario " & _
+    "OUTER APPLY (SELECT TOP 1 SE.NomeSetor FROM Tramitacoes T INNER JOIN Setores SE ON SE.IdSetor = T.IdSetor WHERE T.IdProcesso = P.IdProcesso AND T.DataSaida IS NULL) S " & _
+    "WHERE P.IdProcesso = " & idProcesso)
+
+If rsProc.EOF Then Response.Redirect "lista.asp" : Response.End
+
+' Histórico
+Dim rsHist
+Set rsHist = dbQuery( _
+    "SELECT T.*, S.NomeSetor, U.Nome AS UsuarioNome, " & _
+    "       DATEDIFF(DAY, T.DataEntrada, ISNULL(T.DataSaida,GETDATE())) AS Dias " & _
+    "FROM Tramitacoes T " & _
+    "INNER JOIN Setores S  ON T.IdSetor   = S.IdSetor " & _
+    "INNER JOIN Usuarios U ON T.IdUsuario = U.IdUsuario " & _
+    "WHERE T.IdProcesso = " & idProcesso & " ORDER BY T.DataEntrada ASC")
+%>
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
     <meta charset="utf-8">
-    <title>Processo 2025/000123</title>
-
+    <title>Processo <%=rsProc("NumeroProcesso")%> — Impressão</title>
+    <link rel="stylesheet" href="<%=APP_PATH%>/assets/css/main.css">
     <style>
-        @page {
-            size: A4;
-            margin: 2cm;
-        }
-
-        body {
-            font-family: "Segoe UI", Arial, sans-serif;
-            font-size: 12px;
-            color: #111;
-        }
-
-        .header {
-            text-align: center;
-            border-bottom: 2px solid #000;
-            padding-bottom: 10px;
-            margin-bottom: 20px;
-        }
-
-        .header h2 {
-            margin: 0;
-            font-size: 16px;
-            text-transform: uppercase;
-        }
-
-        .header small {
-            font-size: 11px;
-            color: #555;
-        }
-
-        h1 {
-            text-align: center;
-            font-size: 18px;
-            margin: 25px 0;
-        }
-
-        .section {
-            margin-bottom: 20px;
-        }
-
-        .section-title {
-            font-weight: bold;
-            text-transform: uppercase;
-            font-size: 12px;
-            border-bottom: 1px solid #000;
-            margin-bottom: 8px;
-            padding-bottom: 4px;
-        }
-
-        .grid {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        .grid td {
-            padding: 6px 8px;
-            vertical-align: top;
-        }
-
-        .grid td strong {
-            display: block;
-            font-size: 11px;
-            color: #444;
-        }
-
-        .text-box {
-            line-height: 1.5;
-            text-align: justify;
-        }
-
-        .timeline {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 11px;
-        }
-
-        .timeline th,
-        .timeline td {
-            border: 1px solid #000;
-            padding: 6px;
-            text-align: left;
-        }
-
-        .timeline th {
-            background: #f0f0f0;
-            font-weight: bold;
-        }
-
-        .footer {
-            position: fixed;
-            bottom: 1.5cm;
-            left: 2cm;
-            right: 2cm;
-            text-align: center;
-            font-size: 10px;
-            color: #555;
-            border-top: 1px solid #000;
-            padding-top: 6px;
-        }
+        @media print { .no-print { display:none !important } body { font-size:12px; } }
+        body { padding: 24px; max-width: 900px; margin: 0 auto; }
+        .print-header { text-align:center; margin-bottom:24px; border-bottom:2px solid var(--border); padding-bottom:16px; }
+        .print-header h1 { font-size:18px; margin-bottom:4px; }
+        .print-header p { font-size:12px; color:var(--text-muted); }
     </style>
 </head>
+<body>
 
-<body onload="window.print()">
+<div class="no-print" style="margin-bottom:16px">
+    <button onclick="window.print()" class="btn btn-primary"><i class="fa-solid fa-print"></i> Imprimir</button>
+    <a href="detalhes.asp?id=<%=idProcesso%>" class="btn btn-ghost" style="margin-left:8px">Voltar</a>
+</div>
 
-    <!-- CABEÇALHO -->
-    <div class="header">
-        <h2>ADAPEC</h2>
-        <small>Sistema de Acompanhamento de Processos – SisProc</small>
+<div class="print-header">
+    <h1>SisProc — Ficha de Acompanhamento de Processo</h1>
+    <p>Gerado em <%=fmtDataHora(Now())%> por <%=sessNome%></p>
+</div>
+
+<div class="card-box">
+    <div class="card-box-title">Dados do Processo</div>
+    <div class="detail-grid">
+        <div class="detail-item"><label>Número</label><span><%=rsProc("NumeroProcesso")%></span></div>
+        <div class="detail-item"><label>Tipo</label><span><%=rsProc("TipoProcesso")%></span></div>
+        <div class="detail-item"><label>Status</label><span><%=rsProc("StatusAtual")%></span></div>
+        <div class="detail-item"><label>Setor Atual</label><span><%=rsProc("SetorAtual")%></span></div>
+        <div class="detail-item"><label>Data de Abertura</label><span><%=fmtData(rsProc("DataCriacao"))%></span></div>
+        <div class="detail-item"><label>Dias em Trâmite</label><span><%=rsProc("DiasTotal")%> dias</span></div>
+        <div class="detail-item"><label>Criado por</label><span><%=rsProc("CriadorNome")%></span></div>
     </div>
+    <div style="margin-top:12px"><strong>Assunto:</strong> <%=Server.HtmlEncode(rsProc("Assunto"))%></div>
+    <% If Not IsNull(rsProc("Descricao")) And rsProc("Descricao") <> "" Then %>
+    <div style="margin-top:8px"><strong>Descrição:</strong> <%=Server.HtmlEncode(rsProc("Descricao"))%></div>
+    <% End If %>
+</div>
 
-    <!-- TÍTULO -->
-    <h1>Processo Administrativo nº 2025/000123</h1>
-
-    <!-- DADOS GERAIS -->
-    <div class="section">
-        <div class="section-title">Dados Gerais</div>
-
-        <table class="grid">
+<div class="card-box">
+    <div class="card-box-title">Histórico de Tramitações</div>
+    <table class="data-table" style="font-size:12px">
+        <thead>
             <tr>
-                <td>
-                    <strong>Status</strong>
-                    Em andamento
-                </td>
-                <td>
-                    <strong>Data de Abertura</strong>
-                    10/01/2026
-                </td>
-                <td>
-                    <strong>Setor Atual</strong>
-                    Setor Jurídico
-                </td>
+                <th>#</th>
+                <th>Setor</th>
+                <th>Tipo</th>
+                <th>Usuário</th>
+                <th>Entrada</th>
+                <th>Saída</th>
+                <th>Dias</th>
+                <th>Observação</th>
             </tr>
-            <tr>
-                <td colspan="3">
-                    <strong>Interessado</strong>
-                    João da Silva
-                </td>
-            </tr>
-        </table>
-    </div>
+        </thead>
+        <tbody>
+        <%
+        Dim seq : seq = 1
+        Do While Not rsHist.EOF
+        %>
+        <tr>
+            <td><%=seq%></td>
+            <td><%=rsHist("NomeSetor")%></td>
+            <td><%=rsHist("TipoMovimento")%></td>
+            <td><%=rsHist("UsuarioNome")%></td>
+            <td><%=fmtData(rsHist("DataEntrada"))%></td>
+            <td><%=fmtData(rsHist("DataSaida"))%></td>
+            <td><%=rsHist("Dias")%></td>
+            <td style="font-size:11px"><%=Server.HtmlEncode(rsHist("Observacao"))%></td>
+        </tr>
+        <%
+        seq = seq + 1
+        rsHist.MoveNext
+        Loop
+        %>
+        </tbody>
+    </table>
+</div>
 
-    <!-- DESCRIÇÃO -->
-    <div class="section">
-        <div class="section-title">Assunto / Descrição</div>
-
-        <div class="text-box">
-            Solicitação de análise documental referente ao processo administrativo interno,
-            conforme normas vigentes da instituição.
-        </div>
-    </div>
-
-    <!-- HISTÓRICO -->
-    <div class="section">
-        <div class="section-title">Histórico de Tramitação</div>
-
-        <table class="timeline">
-            <thead>
-                <tr>
-                    <th>Período</th>
-                    <th>Setor</th>
-                    <th>Tempo no Setor</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>10/01/2026 → 12/01/2026</td>
-                    <td>Protocolo</td>
-                    <td>2 dias</td>
-                </tr>
-                <tr>
-                    <td>12/01/2026 → 18/01/2026</td>
-                    <td>Jurídico</td>
-                    <td>6 dias</td>
-                </tr>
-                <tr>
-                    <td>Desde 18/01/2026</td>
-                    <td>Técnico</td>
-                    <td>4 dias</td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
-
-    <!-- RODAPÉ -->
-    <div class="footer">
-        Documento gerado em <%=Day(Now()) & "/" & Month(Now()) & "/" & Year(Now())%>
-        – SisProc
-    </div>
-
+<%
+rsProc.Close : Set rsProc = Nothing
+rsHist.Close : Set rsHist = Nothing
+Call fechaConexao
+%>
 </body>
 </html>

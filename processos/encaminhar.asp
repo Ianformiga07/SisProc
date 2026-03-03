@@ -1,203 +1,112 @@
-
-<!--#include file="../config/app.asp" -->
-<!--#include file="../Lib/Conexao.asp" -->
-<!--#include file="../includes/seguranca.asp" -->
-
+<%@LANGUAGE="VBSCRIPT" CODEPAGE="65001"%>
 <%
-call abreConexao
+Response.CodePage = 65001
+Response.Charset  = "UTF-8"
+%>
+<!--#include file="../config/app.asp"-->
+<!--#include file="../Lib/Conexao.asp"-->
+<!--#include file="../includes/seguranca.asp"-->
+<%
+Call abreConexao
 
-' ===============================
-' RECEBENDO DADOS DO FORM
-' ===============================
-Dim idProcesso, idSetorDestino, observacao, matriculaUsuario
+' ── RECEBE DADOS ─────────────────────────────────────────
+Dim idProcesso, idSetorDestino, observacao
+idProcesso     = dbInt(Request.Form("id_processo"))
+idSetorDestino = dbInt(Request.Form("setor_destino"))
+observacao     = dbStr(Request.Form("observacao"))
 
-idProcesso        = CLng(Request.Form("id_processo"))
-idSetorDestino    = CLng(Request.Form("setor_destino"))
-observacao        = Trim(Request.Form("observacao"))
-matriculaUsuario  = Session("Matricula")
-
-If idProcesso = 0 Or idSetorDestino = 0 Or matriculaUsuario = "" Then
-    Response.Write "Dados inválidos."
+' ── VALIDAÇÃO BÁSICA ─────────────────────────────────────
+If idProcesso = 0 Or idSetorDestino = 0 Then
+    Response.Redirect "lista.asp"
     Response.End
 End If
 
-
-' ===============================
-' BLOQUEIA PROCESSO FINALIZADO
-' ===============================
-Dim rsStatus, statusProcesso
-
-
-Set rsStatus = conn.Execute("SELECT Ativo as Status FROM Processos WHERE IdProcesso = " & idProcesso)
-If rsStatus.EOF Then
-
-End If
-
-statusProcesso = rsStatus("Status")
-
-rsStatus.Close
-Set rsStatus = Nothing
-
-If statusProcesso = "FINALIZADO" Then
-    Response.Write "Processo já finalizado. Não é possível encaminhar."
+' ── PROCESSO EXISTE E NÃO ESTÁ FINALIZADO ────────────────
+Dim rsProc
+Set rsProc = dbQuery("SELECT Ativo, StatusAtual FROM Processos WHERE IdProcesso = " & idProcesso)
+If rsProc.EOF Or rsProc("Ativo") = False Then
+    rsProc.Close : Set rsProc = Nothing
+    Response.Redirect "detalhes.asp?id=" & idProcesso & "&erro=processo_finalizado"
     Response.End
 End If
+rsProc.Close : Set rsProc = Nothing
 
-
-' =====================================================
-' 🔒 VALIDAÇÃO DE FLUXO - BACK-END (ENTRA AQUI 👇)
-' =====================================================
-
-Dim rsAtual, rsFluxo, idSetorAtual, idTramitacaoAtual
-Dim sqlAtual, sqlFluxo
-
-' Busca a tramitação atual aberta
-sqlAtual = "SELECT TOP 1 IdTramitacao, IdSetor FROM Tramitacoes WHERE IdProcesso = " & idProcesso & " AND DataSaida IS NULL ORDER BY DataEntrada DESC"
-
-Set rsAtual = conn.Execute(sqlAtual)
+' ── BUSCA TRAMITAÇÃO ATUAL ────────────────────────────────
+Dim rsAtual, idSetorAtual, idTramAtual
+Set rsAtual = dbQuery( _
+    "SELECT TOP 1 IdTramitacao, IdSetor FROM Tramitacoes " & _
+    "WHERE IdProcesso = " & idProcesso & " AND DataSaida IS NULL " & _
+    "ORDER BY DataEntrada DESC")
 
 If rsAtual.EOF Then
-    Response.Write "Processo sem tramitação ativa."
+    rsAtual.Close : Set rsAtual = Nothing
+    Response.Redirect "detalhes.asp?id=" & idProcesso
     Response.End
 End If
 
 idSetorAtual = rsAtual("IdSetor")
-idTramitacaoAtual = rsAtual("IdTramitacao")
+idTramAtual  = rsAtual("IdTramitacao")
+rsAtual.Close : Set rsAtual = Nothing
 
-rsAtual.Close
-Set rsAtual = Nothing
-
-
-' Verifica se o setor destino é permitido a partir do atual
-sqlFluxo = "SELECT 1 FROM FluxoSetores WHERE IdSetorOrigem = " & idSetorAtual & " AND IdSetorDestino = " & idSetorDestino & ""
-'response.write sqlFluxo
-'response.end
-Set rsFluxo = conn.Execute(sqlFluxo)
-
-If rsFluxo.EOF Then
-    Response.Write "Encaminhamento não permitido para este setor."
+' ── VALIDA FLUXO NO BANCO (único ponto de verdade) ───────
+Dim rsFluxo
+Set rsFluxo = dbQuery( _
+    "SELECT COUNT(*) AS Ok FROM FluxoSetores " & _
+    "WHERE IdSetorOrigem = " & idSetorAtual & _
+    "  AND IdSetorDestino = " & idSetorDestino & _
+    "  AND Ativo = 1")
+If rsFluxo("Ok") = 0 Then
+    rsFluxo.Close : Set rsFluxo = Nothing
+    Response.Redirect "detalhes.asp?id=" & idProcesso & "&erro=fluxo_invalido"
     Response.End
 End If
+rsFluxo.Close : Set rsFluxo = Nothing
 
-rsFluxo.Close
-Set rsFluxo = Nothing
+' ── 1. FECHA A TRAMITAÇÃO ATUAL ───────────────────────────
+dbExecute "UPDATE Tramitacoes SET DataSaida = GETDATE() WHERE IdTramitacao = " & idTramAtual
 
+' ── 2. INSERE NOVA TRAMITAÇÃO ─────────────────────────────
+dbExecute _
+    "INSERT INTO Tramitacoes (IdProcesso, IdSetor, IdUsuario, Observacao, TipoMovimento) " & _
+    "VALUES (" & idProcesso & ", " & idSetorDestino & ", " & sessId & ", '" & observacao & "', 'Encaminhar')"
 
-' ===============================
-' 1️⃣ FECHA TRAMITAÇÃO ATUAL
-' ===============================
-Dim sqlFecha
-sqlFecha = "UPDATE Tramitacoes " & _
-           "SET DataSaida = GETDATE() " & _
-           "WHERE IdProcesso = " & idProcesso & " AND DataSaida IS NULL"
+Dim idTramNova : idTramNova = dbLastId()
 
-conn.Execute sqlFecha
-
-' ===============================
-' 2️⃣ INSERE NOVA TRAMITAÇÃO
-' ===============================
-Dim sqlInsert
-sqlInsert = "INSERT INTO Tramitacoes " & _
-            "(IdProcesso, IdSetor, MatriculaUsuario, Observacao, DataEntrada) VALUES (" & _
-            idProcesso & ", " & _
-            idSetorDestino & ", '" & _
-            Replace(matriculaUsuario,"'","''") & "', '" & _
-            Replace(observacao,"'","''") & "', GETDATE())"
-
-conn.Execute sqlInsert
-
-
-' ===============================
-' FINALIZA PROCESSO SE FOR SETOR FINAL
-' ===============================
-If CLng(idSetorDestino) = 7 Then
-
-    Dim sqlFinaliza
-    sqlFinaliza = "UPDATE Processos " & _
-                  "SET Status = 'FINALIZADO', " & _
-                  "    DataFinalizacao = GETDATE(), " & _
-                  "    Ativo = 0 " & _
-                  "WHERE IdProcesso = " & CLng(idProcesso)
-    'response.write sqlFinaliza
-    'response.end
-    conn.Execute sqlFinaliza
-
-End If
-
-' ===============================
-' 3️⃣ PEGA O ID DA TRAMITAÇÃO CRIADA
-' ===============================
-Dim rsID, idTramitacaoNova
-
-Set rsID = conn.Execute("SELECT @@IDENTITY AS Id")
-idTramitacaoNova = rsID("Id")
-rsID.Close
-Set rsID = Nothing
-
-' ===============================
-' 4️⃣ FUNÇÃO PARA SALVAR DETALHES
-' ===============================
+' ── 3. SALVA DETALHES ESPECÍFICOS DO SETOR ───────────────
 Sub salvarDetalhe(campo, valor)
-    If Trim(valor) <> "" Then
-        conn.Execute "INSERT INTO TramitacaoDetalhes (IdTramitacao, Campo, Valor) VALUES (" & _
-                     idTramitacaoNova & ", '" & campo & "', '" & Replace(valor,"'","''") & "')"
+    Dim v : v = dbStr(Trim(Request.Form(valor)))
+    If v <> "" Then
+        dbExecute "INSERT INTO TramitacaoDetalhes (IdTramitacao, Campo, Valor) " & _
+                  "VALUES (" & idTramNova & ", '" & campo & "', '" & v & "')"
     End If
 End Sub
 
-' ===============================
-' 5️⃣ SALVA DETALHES CONFORME SETOR
-' ===============================
-Dim setorAtual
-setorAtual = idSetorDestino
+Select Case idSetorDestino
+    Case 2  ' Setor Solicitante
+        Call salvarDetalhe("Descrição",  "descricao")
+        Call salvarDetalhe("Quantidade", "quantidade")
+        Call salvarDetalhe("Urgência",   "urgencia")
+    Case 3  ' Compras
+        Call salvarDetalhe("Fornecedor",    "fornecedor")
+        Call salvarDetalhe("Cotações",      "cotacoes")
+        Call salvarDetalhe("Tipo de Compra","tipo_compra")
+    Case 4  ' Planejamento
+        Call salvarDetalhe("Análise",    "analise_planejamento")
+        Call salvarDetalhe("Impacto",    "impacto")
+        Call salvarDetalhe("Prioridade", "prioridade")
+    Case 5  ' Licitação SCL
+        Call salvarDetalhe("Nº Processo Licitatório", "numero_edital")
+        Call salvarDetalhe("Modalidade",              "modalidade")
+        Call salvarDetalhe("Parecer Jurídico",        "parecer_juridico")
+    Case 6  ' Financeiro
+        Call salvarDetalhe("Centro de Custo", "centro_custo")
+        Call salvarDetalhe("Autorização",     "autorizacao")
+    Case 7  ' NAP
+        Call salvarDetalhe("Análise NAP",  "providencia_nap")
+        Call salvarDetalhe("Status NAP",   "status_nap")
+End Select
 
-' --- SETOR SOLICITANTE (2)
-If setorAtual = 2 Then
-    Call salvarDetalhe("Descricao", Request.Form("descricao"))
-    Call salvarDetalhe("Quantidade", Request.Form("quantidade"))
-    Call salvarDetalhe("Urgencia", Request.Form("urgencia"))
-End If
+Call fechaConexao
 
-' --- COMPRAS (3)
-If setorAtual = 3 Then
-    Call salvarDetalhe("Fornecedor", Request.Form("fornecedor"))
-    Call salvarDetalhe("Cotacoes", Request.Form("cotacoes"))
-    Call salvarDetalhe("TipoCompra", Request.Form("tipo_compra"))
-End If
-
-' --- PLANEJAMENTO (4)
-If setorAtual = 4 Then
-    Call salvarDetalhe("AnalisePlanejamento", Request.Form("analise_planejamento"))
-End If
-
-' --- LICITAÇÃO - SCL (5)
-If setorAtual = 5 Then
-    Call salvarDetalhe("Modalidade", Request.Form("modalidade"))
-    Call salvarDetalhe("NumeroEdital", Request.Form("numero_edital"))
-End If
-
-' --- FINANCEIRO (6)
-If setorAtual = 6 Then
-    Call salvarDetalhe("Autorizacao", Request.Form("autorizacao"))
-    Call salvarDetalhe("CentroCusto", Request.Form("centro_custo"))
-End If
-
-' --- NAP (7)
-If setorAtual = 7 Then
-    Call salvarDetalhe("ProvidenciaNAP", Request.Form("providencia_nap"))
-End If
-
-' ===============================
-' 6️⃣ ATUALIZA STATUS DO PROCESSO
-' ===============================
-'Dim sqlStatus
-'sqlStatus = "UPDATE Processos SET Ativo = 1 WHERE IdProcesso = " & idProcesso
-'conn.Execute sqlStatus
-
-
-call fechaConexao
-
-' ===============================
-' 7️⃣ REDIRECIONA
-' ===============================
 Response.Redirect "detalhes.asp?id=" & idProcesso
 %>

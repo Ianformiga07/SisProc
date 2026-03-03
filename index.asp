@@ -1,220 +1,256 @@
-<!--#include file="config/app.asp" -->
-<!--#include file="Lib/Conexao.asp" -->
-<!--#include file="includes/seguranca.asp" -->
-
+<%@LANGUAGE="VBSCRIPT" CODEPAGE="65001"%>
 <%
-call abreConexao
+Response.CodePage = 65001
+Response.Charset  = "UTF-8"
+%>
+<!--#include file="config/app.asp"-->
+<!--#include file="Lib/Conexao.asp"-->
+<!--#include file="includes/seguranca.asp"-->
+<!--#include file="includes/utils.asp"-->
+<%
+Call abreConexao
 
-' ===============================
-' KPIs
-' ===============================
-Dim rs, totalProcessos, processosAtivos, processosFinalizados
+' ── KPIs ──────────────────────────────────────────────────
+Dim rsKpi
+Set rsKpi = dbQuery( _
+    "SELECT " & _
+    "  (SELECT COUNT(*) FROM Processos)                              AS Total, " & _
+    "  (SELECT COUNT(*) FROM Processos WHERE Ativo = 1)             AS Andamento, " & _
+    "  (SELECT COUNT(*) FROM Processos WHERE Ativo = 0)             AS Finalizados, " & _
+    "  (SELECT COUNT(DISTINCT IdProcesso) FROM Tramitacoes " & _
+    "   WHERE DataSaida IS NULL " & _
+    "   AND DATEDIFF(DAY, DataEntrada, GETDATE()) >= " & SLA_ALERTA_DIAS & ") AS Atrasados")
 
-Set rs = conn.Execute("SELECT COUNT(*) AS Total FROM Processos")
-totalProcessos = rs("Total") : rs.Close
+Dim kTotal, kAndamento, kFinalizados, kAtrasados
+kTotal       = rsKpi("Total")
+kAndamento   = rsKpi("Andamento")
+kFinalizados = rsKpi("Finalizados")
+kAtrasados   = rsKpi("Atrasados")
+rsKpi.Close : Set rsKpi = Nothing
 
-Set rs = conn.Execute("SELECT COUNT(*) AS Total FROM Processos WHERE Ativo = 1")
-processosAtivos = rs("Total") : rs.Close
+' ── PROCESSOS POR SETOR (gráfico barra) ──────────────────
+Dim rsSetor, labelsSetor, valoresSetor, coresSetor
+labelsSetor  = ""
+valoresSetor = ""
+coresSetor   = ""
+Dim corArr(7)
+corArr(0) = "#1a56db" : corArr(1) = "#0ea5e9" : corArr(2) = "#8b5cf6"
+corArr(3) = "#ec4899" : corArr(4) = "#f97316" : corArr(5) = "#16a34a"
+corArr(6) = "#dc2626"
 
-Set rs = conn.Execute("SELECT COUNT(*) AS Total FROM Processos WHERE Ativo = 0")
-processosFinalizados = rs("Total") : rs.Close
+Dim iSetor : iSetor = 0
+Set rsSetor = dbQuery( _
+    "SELECT S.NomeSetor, COUNT(*) AS Total " & _
+    "FROM Tramitacoes AS T " & _
+    "INNER JOIN Setores AS S ON S.IdSetor = T.IdSetor " & _
+    "WHERE T.DataSaida IS NULL " & _
+    "GROUP BY S.NomeSetor " & _
+    "ORDER BY S.NomeSetor" _
+)
 
-' ===============================
-' PROCESSOS POR MÊS (6 últimos)
-' ===============================
+Do While Not rsSetor.EOF
+    labelsSetor  = labelsSetor  & "'" & rsSetor("NomeSetor") & "',"
+    valoresSetor = valoresSetor & rsSetor("Total") & ","
+    coresSetor   = coresSetor   & "'" & corArr(iSetor Mod 7) & "',"
+    iSetor = iSetor + 1
+    rsSetor.MoveNext
+Loop
+rsSetor.Close : Set rsSetor = Nothing
+
+' ── PROCESSOS POR MÊS (últimos 6) ────────────────────────
 Dim rsMes, labelsMes, valoresMes
-labelsMes = ""
+labelsMes  = ""
 valoresMes = ""
-
-Set rsMes = conn.Execute("SELECT FORMAT(DataCriacao,'MM/yyyy') AS Mes, COUNT(*) AS Total FROM Processos WHERE DataCriacao >= DATEADD(MONTH,-5,GETDATE()) GROUP BY FORMAT(DataCriacao,'MM/yyyy') ORDER BY MIN(DataCriacao)")
+Set rsMes = dbQuery( _
+    "SELECT FORMAT(DataCriacao,'MM/yyyy') AS Mes, COUNT(*) AS Total " & _
+    "FROM Processos " & _
+    "WHERE DataCriacao >= DATEADD(MONTH,-5,GETDATE()) " & _
+    "GROUP BY FORMAT(DataCriacao,'MM/yyyy') " & _
+    "ORDER BY MIN(DataCriacao)")
 
 Do While Not rsMes.EOF
     labelsMes  = labelsMes  & "'" & rsMes("Mes") & "',"
     valoresMes = valoresMes & rsMes("Total") & ","
     rsMes.MoveNext
 Loop
+rsMes.Close : Set rsMes = Nothing
 
-rsMes.Close
-Set rsMes = Nothing
+' ── ÚLTIMOS 5 PROCESSOS ──────────────────────────────────
+Dim rsRecentes
+Set rsRecentes = dbQuery( _
+    "SELECT TOP 5 NumeroProcesso, Assunto, SetorAtual, DiasNoSetor, StatusAtual, IdProcesso " & _
+    "FROM vw_ProcessosLista " & _
+    "ORDER BY DataCriacao DESC")
+
+' ── Variáveis de layout ──────────────────────────────────
+Dim paginaAtiva : paginaAtiva = "dashboard"
+Dim pageTitulo  : pageTitulo  = "Dashboard"
+
+Function badgeSLA(dias)
+
+    If IsNull(dias) Then
+        badgeSLA = "badge badge-neutral"
+        Exit Function
+    End If
+
+    If dias <= SLA_ALERTA_DIAS Then
+        badgeSLA = "badge badge-success"
+    ElseIf dias <= (SLA_ALERTA_DIAS + 3) Then
+        badgeSLA = "badge badge-warning"
+    Else
+        badgeSLA = "badge badge-danger"
+    End If
+
+End Function
 %>
-
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-<meta charset="utf-8">
-<title>SisProc - Dashboard</title>
-
-<link rel="stylesheet" href="<%=APP_PATH%>/assets/css/dashboard.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-
-<body>
-
-<!-- ================= TOPO ================= -->
-<header class="topbar">
-    <div class="top-brand">
-        <strong>SisProc</strong>
-    </div>
-
-    <div class="top-toggle">
-        <button class="btn-menu" onclick="toggleMenu()">☰</button>
-    </div>
-
-    <div class="top-right">
-        <span class="user"><i class="fa-solid fa-user"></i> <%=Session("Nome")%></span>
-        <a href="<%=APP_PATH%>/auth/logout.asp" class="btn-logout">Sair</a>
-    </div>
-</header>
-
-<div class="layout" id="layout">
-
-    <!-- ================= SIDEBAR ================= -->
-    <aside class="sidebar">
-        <nav>
-            <a href="<%=APP_PATH%>/index.asp">
-                <span class="icon"><i class="fa-solid fa-house"></i></span>
-                <span class="text">Dashboard</span>
-            </a>
-
-            <a href="<%=APP_PATH%>/processos/lista.asp" class="active">
-                <span class="icon"><i class="fa-solid fa-folder-open"></i></span>
-                <span class="text">Processos</span>
-            </a>
-
-            <% If Session("IdPerfil") = 1 Then %>
-                <a href="<%=APP_PATH%>/usuarios/lista.asp">
-                    <span class="icon"><i class="fa-solid fa-users"></i></span>
-                    <span class="text">Usuários</span>
-                </a>
-            <% End If %>
-        </nav>
-    </aside>
-<!-- CONTEÚDO -->
-<main class="content">
-
-<h1>Dashboard</h1>
+<!--#include file="includes/layout.asp"-->
 
 <!-- KPIs -->
-<div class="cards">
-    <div class="card card-primary">
-        <h3>Total de Processos</h3>
-        <strong><%=totalProcessos%></strong>
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-icon blue"><i class="fa-solid fa-folder"></i></div>
+        <div class="kpi-label">Total de Processos</div>
+        <div class="kpi-value"><%=kTotal%></div>
     </div>
-
-    <div class="card card-success">
-        <h3>Em andamento</h3>
-        <strong><%=processosAtivos%></strong>
+    <div class="kpi-card">
+        <div class="kpi-icon yellow"><i class="fa-solid fa-spinner"></i></div>
+        <div class="kpi-label">Em Andamento</div>
+        <div class="kpi-value"><%=kAndamento%></div>
     </div>
-
-    <div class="card card-neutral">
-        <h3>Finalizados</h3>
-        <strong><%=processosFinalizados%></strong>
+    <div class="kpi-card">
+        <div class="kpi-icon green"><i class="fa-solid fa-check-circle"></i></div>
+        <div class="kpi-label">Finalizados</div>
+        <div class="kpi-value"><%=kFinalizados%></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon red"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div class="kpi-label">Atrasados (><%=SLA_ALERTA_DIAS%> dias)</div>
+        <div class="kpi-value"><%=kAtrasados%></div>
     </div>
 </div>
 
 <!-- GRÁFICOS -->
-<div class="dashboard-grid">
-
-    <!-- PIZZA -->
+<div class="charts-grid">
     <div class="card-box">
-        <h3>Status dos Processos</h3>
-        <canvas id="graficoStatus"></canvas>
+        <div class="card-box-title"><i class="fa-solid fa-chart-pie"></i> Status</div>
+        <div class="chart-wrap">
+            <canvas id="graficoStatus"></canvas>
+        </div>
     </div>
-
-    <!-- BARRAS -->
     <div class="card-box">
-        <h3>Processos criados por mês</h3>
-        <canvas id="graficoMes"></canvas>
+        <div class="card-box-title"><i class="fa-solid fa-chart-bar"></i> Processos por Mês</div>
+        <div class="chart-wrap">
+            <canvas id="graficoMes"></canvas>
+        </div>
     </div>
-
 </div>
 
-</main>
+<div class="card-box">
+    <div class="card-box-title"><i class="fa-solid fa-sitemap"></i> Processos por Setor (ativos)</div>
+    <div class="chart-wrap">
+        <canvas id="graficoSetor"></canvas>
+    </div>
 </div>
 
-<footer class="footer">
-SisProc © <%=Year(Now())%>
-</footer>
+<!-- RECENTES -->
+<div class="card-box">
+    <div class="card-box-title">
+        <i class="fa-solid fa-clock-rotate-left"></i> Últimos Processos
+        <a href="<%=APP_PATH%>/processos/lista.asp" class="btn btn-ghost btn-sm" style="margin-left:auto">Ver todos</a>
+    </div>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Nº Processo</th>
+                    <th>Assunto</th>
+                    <th>Setor Atual</th>
+                    <th>Dias no Setor</th>
+                    <th>Status</th>
+                    <th class="col-center">Ação</th>
+                </tr>
+            </thead>
+            <tbody>
+            <% If rsRecentes.EOF Then %>
+                <tr><td colspan="6" class="empty-table"><i class="fa-regular fa-folder-open"></i>Nenhum processo cadastrado.</td></tr>
+            <% Else %>
+            <% Do While Not rsRecentes.EOF %>
+                <tr>
+                    <td><span class="num-processo"><%=rsRecentes("NumeroProcesso")%></span></td>
+                    <td><%=rsRecentes("Assunto")%></td>
+                    <td><span class="badge badge-setor"><%=rsRecentes("SetorAtual")%></span></td>
+                    <td><span class="<%=badgeSLA(rsRecentes("DiasNoSetor"))%>"><%=rsRecentes("DiasNoSetor")%> dias</span></td>
+                    <td><span class="badge <%=badgeStatus(rsRecentes("StatusAtual"))%>"><%=rsRecentes("StatusAtual")%></span></td>
+                    <td class="col-center">
+                        <a href="<%=APP_PATH%>/processos/detalhes.asp?id=<%=rsRecentes("IdProcesso")%>" class="btn btn-outline btn-sm">
+                            <i class="fa-solid fa-eye"></i>
+                        </a>
+                    </td>
+                </tr>
+            <% rsRecentes.MoveNext : Loop %>
+            <% End If %>
+            </tbody>
+        </table>
+    </div>
+</div>
 
+<%
+rsRecentes.Close : Set rsRecentes = Nothing
+Call fechaConexao
+%>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-function toggleMenu(){
-    document.getElementById("layout").classList.toggle("collapsed");
-}
+Chart.defaults.font.family = "'IBM Plex Sans', sans-serif";
+Chart.defaults.font.size   = 12;
 
-// Gráfico Pizza (AJUSTADO)
+// Doughnut - Status
 new Chart(document.getElementById('graficoStatus'), {
     type: 'doughnut',
     data: {
         labels: ['Em andamento', 'Finalizados'],
         datasets: [{
-            data: [<%=processosAtivos%>, <%=processosFinalizados%>],
-            backgroundColor: ['#3498db', '#2ecc71'],
+            data: [<%=kAndamento%>, <%=kFinalizados%>],
+            backgroundColor: ['#1a56db', '#16a34a'],
             borderWidth: 0
         }]
     },
     options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: '70%',   // <<< AQUI resolve o "miolo gigante"
-        plugins: {
-            legend: {
-                position: 'bottom',
-                labels: {
-                    boxWidth: 12,
-                    padding: 15,
-                    font: {
-                        size: 12
-                    }
-                }
-            }
-        }
+        responsive: true, maintainAspectRatio: false,
+        cutout: '68%',
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, padding: 14 } } }
     }
 });
 
-
-// Gráfico Barras (AJUSTADO)
+// Barras - Por Mês
 new Chart(document.getElementById('graficoMes'), {
     type: 'bar',
     data: {
         labels: [<%=labelsMes%>],
-        datasets: [{
-            label: 'Processos',
-            data: [<%=valoresMes%>],
-            backgroundColor: '#9b59b6',
-            borderRadius: 6,
-            maxBarThickness: 40,   // 🔥 limite máximo da largura
-            categoryPercentage: 0.6,
-            barPercentage: 0.8
-        }]
+        datasets: [{ label: 'Processos', data: [<%=valoresMes%>],
+            backgroundColor: '#1a56db', borderRadius: 5, maxBarThickness: 40 }]
     },
     options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: {
-                display: false  }
-        },
-        scales: {
-            x: {
-                ticks: {
-                    font: { size: 11 }
-                }
-            },
-            y: {
-                beginAtZero: true,
-                ticks: {
-                    font: { size: 11 }
-                }
-            }
-        }
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+    }
+});
+
+// Barras - Por Setor
+new Chart(document.getElementById('graficoSetor'), {
+    type: 'bar',
+    data: {
+        labels: [<%=labelsSetor%>],
+        datasets: [{ label: 'Processos', data: [<%=valoresSetor%>],
+            backgroundColor: [<%=coresSetor%>], borderRadius: 5, maxBarThickness: 50 }]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
     }
 });
 </script>
 
-<%
-call fechaConexao
-%>
-
-</body>
-</html>
+<!--#include file="includes/layout_footer.asp"-->

@@ -1,0 +1,92 @@
+PASSO A PASSO SIMPLES – COMO SUBIR UM PROJETO NO GIT (WINDOWS)
+Usando PowerShell – Token já criado
+
+--------------------------------------------------
+
+PASSO 1 – Abrir o PowerShell
+Abra o Windows PowerShell e vá até a pasta do projeto:
+
+cd C:\CAMINHO_DO_SEU_PROJETO
+
+Exemplo:
+cd C:\SisProc
+
+--------------------------------------------------
+
+PASSO 2 – Iniciar o Git no projeto (apenas uma vez)
+
+git init
+
+--------------------------------------------------
+
+PASSO 3 – Verificar os arquivos do projeto
+
+git status
+
+--------------------------------------------------
+
+PASSO 4 – Adicionar todos os arquivos ao Git
+
+git add .
+
+--------------------------------------------------
+
+PASSO 5 – Criar o commit
+
+git commit -m "primeira versão do sistema"
+
+--------------------------------------------------
+
+PASSO 6 – Garantir que a branch seja MAIN
+
+git branch -M main
+
+--------------------------------------------------
+
+PASSO 7 – Conectar com o repositório do GitHub (uma vez só)
+
+git remote add origin https://github.com/USUARIO/REPOSITORIO.git
+
+Se já existir e der erro:
+
+git remote set-url origin https://github.com/USUARIO/REPOSITORIO.git
+
+--------------------------------------------------
+
+PASSO 8 – Enviar o projeto para o GitHub
+
+git push -u origin main
+
+Na autenticação:
+Usuário: seu usuário do GitHub
+Senha: cole o TOKEN (não é a senha da conta)
+
+--------------------------------------------------
+
+SE DER ERRO: fetch first
+
+Use:
+
+git push -u origin main --force
+
+Atenção: isso substitui o conteúdo do GitHub pelo local.
+
+--------------------------------------------------
+
+PARA ATUALIZAR O PROJETO (DEPOIS)
+
+Sempre que alterar o código:
+
+git add .
+git commit -m "descrição da alteração"
+git push
+
+--------------------------------------------------
+
+RESUMO RÁPIDO
+
+git add .
+git commit -m "mensagem"
+git push
+
+--------------------------------------------------
