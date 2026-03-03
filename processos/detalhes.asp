@@ -84,8 +84,6 @@ End If
 rsProc.Close : Set rsProc = Nothing
 
 ' ── PERMISSAO ────────────────────────────────────────────
-' Admin sempre pode agir. Usuario comum só se for do setor atual.
-' sessIdSetor vem da Session populada no login.
 Dim podeAgir
 If processoFinalizado Then
     podeAgir = False
@@ -97,7 +95,7 @@ Else
     podeAgir = False
 End If
 
-' ── SETORES DESTINO (apenas os permitidos pelo FluxoSetores) ─
+' ── SETORES DESTINO PERMITIDOS (FluxoSetores) ────────────
 Dim rsDestinos
 Set rsDestinos = dbQuery( _
     "SELECT F.IdSetorDestino, S.NomeSetor " & _
@@ -162,7 +160,7 @@ Else
 End If
 rsAnterior.Close : Set rsAnterior = Nothing
 
-' ── Flags de retorno para SweetAlert ─────────────────────
+' ── FLAGS DE RETORNO ─────────────────────────────────────
 Dim flagNovo        : flagNovo        = (Request.QueryString("novo") = "1")
 Dim flagEncaminhado : flagEncaminhado = (Request.QueryString("ok")   = "encaminhado")
 Dim flagDevolvido   : flagDevolvido   = (Request.QueryString("ok")   = "devolvido")
@@ -198,7 +196,7 @@ Dim paginaAtiva : paginaAtiva = "processos"
 </div>
 <% End If %>
 
-<!-- AVISO SOMENTE LEITURA (outro setor, nao admin) -->
+<!-- AVISO SOMENTE LEITURA -->
 <% If Not processoFinalizado And Not podeAgir Then %>
 <div class="alert alert-info" style="margin-bottom:16px">
     <i class="fa-solid fa-circle-info"></i>
@@ -210,7 +208,6 @@ Dim paginaAtiva : paginaAtiva = "processos"
 <!-- BOTOES DE ACAO -->
 <% If podeAgir Then %>
 <div class="action-bar">
-
     <% If Not rsDestinos.EOF Then %>
     <button onclick="abrirModal('modalEncaminhar')" class="btn btn-primary">
         <i class="fa-solid fa-share"></i> Encaminhar
@@ -224,13 +221,11 @@ Dim paginaAtiva : paginaAtiva = "processos"
     <% End If %>
 
     <% If sessIsAdmin Then %>
-    <a href="finalizar.asp?id=<%=idProcesso%>"
-       class="btn btn-success"
+    <a href="finalizar.asp?id=<%=idProcesso%>" class="btn btn-success"
        onclick="return confirm('Confirmar finalizacao deste processo?')">
         <i class="fa-solid fa-check-circle"></i> Finalizar
     </a>
     <% End If %>
-
 </div>
 <% End If %>
 
@@ -347,113 +342,202 @@ Dim paginaAtiva : paginaAtiva = "processos"
 rsHist.Close : Set rsHist = Nothing
 %>
 
-<!-- MODAL ENCAMINHAR -->
+<!-- ===== MODAL ENCAMINHAR ===== -->
+<%
+' Monta label do botao e campos conforme SETOR ATUAL (quem encaminha)
+' Cada setor preenche suas proprias informacoes AO encaminhar
+Dim tituloModal : tituloModal = "Encaminhar Processo"
+%>
 <div id="modalEncaminhar" class="modal-overlay" onclick="fecharSeOverlay(event,'modalEncaminhar')">
     <div class="modal-box">
         <div class="modal-header">
-            <h3><i class="fa-solid fa-share" style="color:var(--primary)"></i> Encaminhar Processo</h3>
+            <h3><i class="fa-solid fa-share" style="color:var(--primary)"></i> <%=tituloModal%></h3>
             <button class="modal-close" onclick="fecharModal('modalEncaminhar')"><i class="fa-solid fa-xmark"></i></button>
         </div>
         <form method="post" action="encaminhar.asp">
             <div class="modal-body">
                 <input type="hidden" name="id_processo" value="<%=idProcesso%>">
 
+                <!-- SELECT DE DESTINO: apenas setores permitidos pelo FluxoSetores -->
                 <div class="form-group">
                     <label>Encaminhar para <span style="color:var(--danger)">*</span></label>
-                    <select name="setor_destino" required id="selDestino" onchange="mostrarCampos(this.value)">
+                    <select name="setor_destino" required>
                         <option value="">Selecione o setor...</option>
-                        <% Do While Not rsDestinos.EOF %>
+                        <%
+                        ' rsDestinos ja foi aberto acima, precisa rebobinar
+                        rsDestinos.MoveFirst
+                        Do While Not rsDestinos.EOF
+                        %>
                             <option value="<%=rsDestinos("IdSetorDestino")%>"><%=rsDestinos("NomeSetor")%></option>
                         <% rsDestinos.MoveNext : Loop %>
                     </select>
                 </div>
 
+                <!-- OBSERVACAO: sempre visivel -->
                 <div class="form-group">
                     <label>Observacao</label>
                     <textarea name="observacao" rows="3" placeholder="Observacoes sobre o encaminhamento..."></textarea>
                 </div>
 
-                <div class="campos-setor" id="campos-2">
-                    <div class="campos-setor-titulo">Informacoes — Setor Solicitante</div>
-                    <div class="form-group"><label>Descricao do Pedido</label><textarea name="descricao" rows="3"></textarea></div>
+                <%
+                ' ── CAMPOS EXTRAS BASEADOS NO SETOR ATUAL (quem esta encaminhando) ──
+                ' Protocolo (1): sem campos extras
+                ' Setor Solicitante (2): descricao, quantidade, urgencia
+                ' Compras (3): fornecedor, cotacoes, tipo_compra
+                ' Planejamento (4): analise, impacto, prioridade
+                ' Licitacao SCL (5): num_edital, modalidade, parecer_juridico
+                ' Financeiro (6): centro_custo, autorizacao
+                ' NAP (7): providencia_nap, status_nap
+                Select Case idSetorAtual
+                %>
+
+                <% Case 2 ' ── SETOR SOLICITANTE encaminhando ── %>
+                <div style="margin-top:4px;padding-top:14px;border-top:1px dashed var(--border)">
+                    <div class="campos-setor-titulo">Informacoes do Setor Solicitante</div>
+                    <div class="form-group">
+                        <label>Descricao do Pedido <span style="color:var(--danger)">*</span></label>
+                        <textarea name="descricao" rows="3" required placeholder="Descreva detalhadamente o que precisa..."></textarea>
+                    </div>
                     <div class="form-grid">
-                        <div class="form-group"><label>Quantidade</label><input type="number" name="quantidade" min="1"></div>
                         <div class="form-group">
-                            <label>Urgencia</label>
-                            <select name="urgencia">
+                            <label>Quantidade <span style="color:var(--danger)">*</span></label>
+                            <input type="number" name="quantidade" min="1" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Urgencia <span style="color:var(--danger)">*</span></label>
+                            <select name="urgencia" required>
                                 <option value="">Selecione</option>
-                                <option>Normal</option><option>Urgente</option>
+                                <option>Normal</option>
+                                <option>Urgente</option>
                             </select>
                         </div>
                     </div>
                 </div>
 
-                <div class="campos-setor" id="campos-3">
-                    <div class="campos-setor-titulo">Informacoes — Compras</div>
-                    <div class="form-group"><label>Fornecedor</label><input type="text" name="fornecedor"></div>
+                <% Case 3 ' ── COMPRAS encaminhando ── %>
+                <div style="margin-top:4px;padding-top:14px;border-top:1px dashed var(--border)">
+                    <div class="campos-setor-titulo">Informacoes de Compras</div>
+                    <div class="form-group">
+                        <label>Fornecedor</label>
+                        <input type="text" name="fornecedor" placeholder="Nome do fornecedor...">
+                    </div>
                     <div class="form-grid">
-                        <div class="form-group"><label>Cotacoes</label><input type="number" name="cotacoes" min="0"></div>
                         <div class="form-group">
-                            <label>Tipo de Compra</label>
-                            <select name="tipo_compra">
+                            <label>Num de Cotacoes</label>
+                            <input type="number" name="cotacoes" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Tipo de Compra <span style="color:var(--danger)">*</span></label>
+                            <select name="tipo_compra" required>
                                 <option value="">Selecione</option>
-                                <option>Licitacao</option><option>Dispensa</option>
+                                <option>Licitacao</option>
+                                <option>Dispensa</option>
                             </select>
                         </div>
                     </div>
                 </div>
 
-                <div class="campos-setor" id="campos-4">
-                    <div class="campos-setor-titulo">Informacoes — Planejamento</div>
-                    <div class="form-group"><label>Analise de Planejamento</label><textarea name="analise_planejamento" rows="3"></textarea></div>
+                <% Case 4 ' ── PLANEJAMENTO encaminhando ── %>
+                <div style="margin-top:4px;padding-top:14px;border-top:1px dashed var(--border)">
+                    <div class="campos-setor-titulo">Informacoes de Planejamento</div>
+                    <div class="form-group">
+                        <label>Analise de Planejamento <span style="color:var(--danger)">*</span></label>
+                        <textarea name="analise_planejamento" rows="3" required></textarea>
+                    </div>
                     <div class="form-grid">
                         <div class="form-group">
                             <label>Impacto</label>
-                            <select name="impacto"><option value="">Selecione</option><option>Baixo</option><option>Medio</option><option>Alto</option></select>
+                            <select name="impacto">
+                                <option value="">Selecione</option>
+                                <option>Baixo</option>
+                                <option>Medio</option>
+                                <option>Alto</option>
+                            </select>
                         </div>
                         <div class="form-group">
                             <label>Prioridade</label>
-                            <select name="prioridade"><option value="">Selecione</option><option>Normal</option><option>Alta</option><option>Urgente</option></select>
+                            <select name="prioridade">
+                                <option value="">Selecione</option>
+                                <option>Normal</option>
+                                <option>Alta</option>
+                                <option>Urgente</option>
+                            </select>
                         </div>
                     </div>
                 </div>
 
-                <div class="campos-setor" id="campos-5">
-                    <div class="campos-setor-titulo">Informacoes — Licitacao (SCL)</div>
+                <% Case 5 ' ── LICITACAO (SCL) encaminhando ── %>
+                <div style="margin-top:4px;padding-top:14px;border-top:1px dashed var(--border)">
+                    <div class="campos-setor-titulo">Informacoes da Licitacao (SCL)</div>
                     <div class="form-grid">
-                        <div class="form-group"><label>Num Processo Licitatorio</label><input type="text" name="numero_edital"></div>
                         <div class="form-group">
-                            <label>Modalidade</label>
-                            <select name="modalidade"><option value="">Selecione</option><option>Pregao Eletronico</option><option>Pregao Presencial</option><option>Concorrencia</option><option>Dispensa</option></select>
+                            <label>Num do Processo Licitatorio</label>
+                            <input type="text" name="numero_edital">
+                        </div>
+                        <div class="form-group">
+                            <label>Modalidade <span style="color:var(--danger)">*</span></label>
+                            <select name="modalidade" required>
+                                <option value="">Selecione</option>
+                                <option>Pregao Eletronico</option>
+                                <option>Pregao Presencial</option>
+                                <option>Concorrencia</option>
+                                <option>Dispensa</option>
+                            </select>
                         </div>
                     </div>
-                    <div class="form-group"><label>Parecer Juridico</label><textarea name="parecer_juridico" rows="2"></textarea></div>
-                </div>
-
-                <div class="campos-setor" id="campos-6">
-                    <div class="campos-setor-titulo">Informacoes — Financeiro</div>
-                    <div class="form-grid">
-                        <div class="form-group"><label>Centro de Custo</label><input type="text" name="centro_custo"></div>
-                        <div class="form-group">
-                            <label>Autorizacao</label>
-                            <select name="autorizacao"><option value="">Selecione</option><option>Aprovado</option><option>Reprovado</option><option>Pendente</option></select>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="campos-setor" id="campos-7">
-                    <div class="campos-setor-titulo">Informacoes — NAP</div>
-                    <div class="form-group"><label>Analise / Providencia</label><textarea name="providencia_nap" rows="3"></textarea></div>
                     <div class="form-group">
-                        <label>Status NAP</label>
-                        <select name="status_nap"><option value="">Selecione</option><option>Aprovado</option><option>Pendente</option><option>Devolvido</option></select>
+                        <label>Parecer Juridico</label>
+                        <textarea name="parecer_juridico" rows="2"></textarea>
                     </div>
                 </div>
+
+                <% Case 6 ' ── FINANCEIRO encaminhando ── %>
+                <div style="margin-top:4px;padding-top:14px;border-top:1px dashed var(--border)">
+                    <div class="campos-setor-titulo">Informacoes do Financeiro</div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Centro de Custo</label>
+                            <input type="text" name="centro_custo">
+                        </div>
+                        <div class="form-group">
+                            <label>Autorizacao <span style="color:var(--danger)">*</span></label>
+                            <select name="autorizacao" required>
+                                <option value="">Selecione</option>
+                                <option>Aprovado</option>
+                                <option>Reprovado</option>
+                                <option>Pendente</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <% Case 7 ' ── NAP encaminhando ── %>
+                <div style="margin-top:4px;padding-top:14px;border-top:1px dashed var(--border)">
+                    <div class="campos-setor-titulo">Informacoes do NAP</div>
+                    <div class="form-group">
+                        <label>Analise / Providencia <span style="color:var(--danger)">*</span></label>
+                        <textarea name="providencia_nap" rows="3" required></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Status NAP <span style="color:var(--danger)">*</span></label>
+                        <select name="status_nap" required>
+                            <option value="">Selecione</option>
+                            <option>Aprovado</option>
+                            <option>Pendente</option>
+                            <option>Devolvido</option>
+                        </select>
+                    </div>
+                </div>
+
+                <% ' Case 1 (Protocolo) e qualquer outro: sem campos extras %>
+                <% End Select %>
 
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-ghost" onclick="fecharModal('modalEncaminhar')">Cancelar</button>
-                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-share"></i> Confirmar Encaminhamento</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fa-solid fa-share"></i> Confirmar Encaminhamento
+                </button>
             </div>
         </form>
     </div>
@@ -481,7 +565,9 @@ rsHist.Close : Set rsHist = Nothing
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-ghost" onclick="fecharModal('modalDevolver')">Cancelar</button>
-                <button type="submit" class="btn btn-warning"><i class="fa-solid fa-rotate-left"></i> Confirmar Devolucao</button>
+                <button type="submit" class="btn btn-warning">
+                    <i class="fa-solid fa-rotate-left"></i> Confirmar Devolucao
+                </button>
             </div>
         </form>
     </div>
@@ -499,17 +585,7 @@ function fecharModal(id) {
 function fecharSeOverlay(e, id) {
     if (e.target === document.getElementById(id)) fecharModal(id);
 }
-function mostrarCampos(idSetor) {
-    document.querySelectorAll('.campos-setor').forEach(function(el) {
-        el.classList.remove('ativo');
-    });
-    if (idSetor) {
-        var el = document.getElementById('campos-' + idSetor);
-        if (el) el.classList.add('ativo');
-    }
-}
 
-// SweetAlert conforme flag da URL
 <% If flagNovo Then %>
 window.addEventListener('DOMContentLoaded', function() {
     Swal.fire({ icon:'success', title:'Processo criado!',

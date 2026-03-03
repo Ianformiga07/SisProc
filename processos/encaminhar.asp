@@ -20,7 +20,7 @@ If idProcesso = 0 Or idSetorDestino = 0 Then
     Response.End
 End If
 
-' Verifica se processo existe e esta ativo (usa apenas Ativo, sem StatusAtual)
+' Verifica se processo esta ativo
 Dim rsProc
 Set rsProc = dbQuery("SELECT Ativo FROM Processos WHERE IdProcesso = " & idProcesso)
 If rsProc.EOF Or rsProc("Ativo") = False Then
@@ -30,7 +30,7 @@ If rsProc.EOF Or rsProc("Ativo") = False Then
 End If
 rsProc.Close : Set rsProc = Nothing
 
-' Busca a tramitacao atual aberta
+' Busca tramitacao atual aberta
 Dim rsAtual, idSetorAtual, idTramAtual
 Set rsAtual = dbQuery( _
     "SELECT TOP 1 IdTramitacao, IdSetor FROM Tramitacoes " & _
@@ -43,17 +43,17 @@ If rsAtual.EOF Then
     Response.End
 End If
 
-idSetorAtual = rsAtual("IdSetor")
+idSetorAtual = CLng(rsAtual("IdSetor"))
 idTramAtual  = rsAtual("IdTramitacao")
 rsAtual.Close : Set rsAtual = Nothing
 
-' REGRA: so quem pertence ao setor atual pode encaminhar
-If sessIdSetor <> idSetorAtual And Not sessIsAdmin Then
+' Regra: so o setor atual (ou admin) pode encaminhar
+If CLng(sessIdSetor) <> idSetorAtual And Not sessIsAdmin Then
     Response.Redirect "detalhes.asp?id=" & idProcesso & "&erro=sem_permissao"
     Response.End
 End If
 
-' Valida fluxo no banco (unico ponto de verdade)
+' Valida fluxo no banco
 Dim rsFluxo
 Set rsFluxo = dbQuery( _
     "SELECT COUNT(*) AS Ok FROM FluxoSetores " & _
@@ -67,7 +67,7 @@ If rsFluxo("Ok") = 0 Then
 End If
 rsFluxo.Close : Set rsFluxo = Nothing
 
-' 1. Fecha a tramitacao atual
+' 1. Fecha tramitacao atual
 dbExecute "UPDATE Tramitacoes SET DataSaida = GETDATE() WHERE IdTramitacao = " & idTramAtual
 
 ' 2. Insere nova tramitacao
@@ -75,43 +75,52 @@ dbExecute _
     "INSERT INTO Tramitacoes (IdProcesso, IdSetor, MatriculaUsuario, Observacao) " & _
     "VALUES (" & idProcesso & ", " & idSetorDestino & ", '" & sessMatricula & "', '" & observacao & "')"
 
-Dim idTramNova
-Set rsId = conn.Execute("SELECT SCOPE_IDENTITY() AS Id")
+' 3. Pega o ID da tramitacao recem criada
+Dim rsId, idTramNova
+Set rsId = dbQuery("SELECT @@IDENTITY AS Id")
 idTramNova = CLng(rsId("Id"))
 rsId.Close : Set rsId = Nothing
 
-' 3. Salva detalhes especificos por setor destino
+' 4. Salva detalhes baseado no SETOR ATUAL (quem encaminhou)
+'    Cada setor registra suas proprias informacoes ao encaminhar
 Sub salvarDetalhe(campo, formField)
-    Dim v : v = dbStr(Trim(Request.Form(formField)))
+    Dim v : v = dbStr(Trim(Request.Form(formField) & ""))
     If v <> "" Then
         dbExecute "INSERT INTO TramitacaoDetalhes (IdTramitacao, Campo, Valor) " & _
                   "VALUES (" & idTramNova & ", '" & campo & "', '" & v & "')"
     End If
 End Sub
 
-Select Case idSetorDestino
-    Case 2
+Select Case idSetorAtual
+    Case 2 ' Setor Solicitante encaminhou
         Call salvarDetalhe("Descricao",  "descricao")
         Call salvarDetalhe("Quantidade", "quantidade")
         Call salvarDetalhe("Urgencia",   "urgencia")
-    Case 3
-        Call salvarDetalhe("Fornecedor",    "fornecedor")
-        Call salvarDetalhe("Cotacoes",      "cotacoes")
-        Call salvarDetalhe("Tipo de Compra","tipo_compra")
-    Case 4
+
+    Case 3 ' Compras encaminhou
+        Call salvarDetalhe("Fornecedor",     "fornecedor")
+        Call salvarDetalhe("Cotacoes",       "cotacoes")
+        Call salvarDetalhe("Tipo de Compra", "tipo_compra")
+
+    Case 4 ' Planejamento encaminhou
         Call salvarDetalhe("Analise",    "analise_planejamento")
         Call salvarDetalhe("Impacto",    "impacto")
         Call salvarDetalhe("Prioridade", "prioridade")
-    Case 5
+
+    Case 5 ' Licitacao (SCL) encaminhou
         Call salvarDetalhe("Num Licitatorio", "numero_edital")
         Call salvarDetalhe("Modalidade",      "modalidade")
         Call salvarDetalhe("Parecer",         "parecer_juridico")
-    Case 6
+
+    Case 6 ' Financeiro encaminhou
         Call salvarDetalhe("Centro de Custo", "centro_custo")
         Call salvarDetalhe("Autorizacao",     "autorizacao")
-    Case 7
-        Call salvarDetalhe("Analise NAP",  "providencia_nap")
-        Call salvarDetalhe("Status NAP",   "status_nap")
+
+    Case 7 ' NAP encaminhou
+        Call salvarDetalhe("Analise NAP", "providencia_nap")
+        Call salvarDetalhe("Status NAP",  "status_nap")
+
+    ' Case 1 (Protocolo): sem campos extras, so observacao
 End Select
 
 Call fechaConexao
